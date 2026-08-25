@@ -9,7 +9,7 @@ Passive-Mode.
 
 1. In Home Assistant: **Einstellungen -> Add-ons -> Add-on-Store -> ⋮ ->
    Repositories** -> diese Repository-URL hinzufügen:
-   `https://github.com/CHANGE_ME/marstek-mqtt-bridge`
+   `https://github.com/maxortb-prog/Marstek-MQTT-Bridge`
 2. "Marstek MQTT Bridge" installieren.
 3. Konfiguration prüfen/anpassen (siehe [DOCS.md](marstek_bridge/DOCS.md)).
 4. Add-on starten. Unter **Info** empfehlenswert: den Schalter **Watchdog**
@@ -22,13 +22,7 @@ Passive-Mode.
 |---|---|
 | [marstek_bridge](marstek_bridge/DOCS.md) | UDP-zu-MQTT Bruecke fuer Marstek Energiespeicher |
 
-## Hinweis
-
-`CHANGE_ME` in `repository.yaml`, `marstek_bridge/config.yaml` (Feld `url`)
-und in diesem README durch die tatsächliche GitHub-URL/den Maintainer-Namen
-ersetzen, bevor das Repository veröffentlicht wird.
-
-## Wichtiger Hinweis zum Docker-Build
+## Hinweis zum Docker-Build
 
 Das `Dockerfile` in `marstek_bridge/` wurde **nicht** in dieser Umgebung
 gebaut oder getestet (kein Zugriff auf `ghcr.io` in der Entwicklungs-Sandbox).
