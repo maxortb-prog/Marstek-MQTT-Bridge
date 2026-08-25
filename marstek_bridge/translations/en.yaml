@@ -1,0 +1,31 @@
+configuration:
+  device_ip:
+    name: "Device IP"
+    description: "IP address of the Marstek device on the local network."
+  device_udp_port:
+    name: "Device UDP port"
+    description: "UDP port configured in the Marstek app under Open API (default 30000)."
+  device_ble_mac:
+    name: "Bluetooth MAC (auto-detected)"
+    description: "Leave empty to auto-detect and remember on first start."
+  device_type:
+    name: "Device type (auto-detected)"
+    description: "Leave empty to auto-detect and remember on first start."
+  mqtt_host:
+    name: "MQTT host (override)"
+    description: "Only needed if not using the Mosquitto add-on with service discovery."
+  mqtt_port:
+    name: "MQTT port (override)"
+    description: "Only needed if not using the Mosquitto add-on with service discovery."
+  mqtt_username:
+    name: "MQTT username (override)"
+    description: "Only needed if not using the Mosquitto add-on with service discovery."
+  mqtt_password:
+    name: "MQTT password (override)"
+    description: "Only needed if not using the Mosquitto add-on with service discovery."
+  shelly_power_topic:
+    name: "External power measurement topic"
+    description: "MQTT topic of an external power measurement (e.g. Shelly EM) used to drive the passive-mode controller. Leave empty to disable automatic passive-mode regulation."
+  log_level:
+    name: "Log level"
+    description: "Verbosity of the add-on's log output."
