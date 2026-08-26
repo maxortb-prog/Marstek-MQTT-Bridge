@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.10
+
+- **Neuer Debug-Kanal "Debugging - ControlLogic"** (`logging_settings.debug_control_logic`,
+  Standard: aus), eigene Farbe (grün), separat vom allgemeinen `log_level`
+  schaltbar. Loggt: Shelly-Eingang (roh), Shelly-Eingang (entprellt, inkl.
+  Fenstergroesse/Sample-Anzahl), errechnete Leistungsaenderung pro Zyklus.
+  Bewusst getrennt vom allgemeinen Log-Level, da bei haeufigen Shelly-
+  Updates hier sehr viele Zeilen anfallen koennen.
+
 ## 0.0.9
 
 - **cd_time-Keepalive**: Der Passive-Regler sendet jetzt automatisch ein

@@ -31,6 +31,9 @@ configuration:
       log_level:
         name: "Log level"
         description: "'debug' also colorizes control/status/init lines (yellow=control, cyan=status, magenta=init, red=connection) and shows [STATUS]/[CONTROL]/[INIT] tags as a fallback."
+      debug_control_logic:
+        name: "Debugging - ControlLogic"
+        description: "Separate, independently switchable debug log (own color: green) for the passive-mode control loop internals: raw Shelly input, debounced/averaged value, and the computed power change per cycle. Kept separate from the general log level because it can produce a high volume of log lines on frequent Shelly updates."
   mqtt_port:
     name: "MQTT port (override)"
     description: "Only needed if not using the Mosquitto add-on with service discovery. Leave empty for auto-detection."

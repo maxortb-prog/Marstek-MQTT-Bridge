@@ -44,6 +44,10 @@ from udp_client import (
 
 logger = logging.getLogger("marstek.bridge")
 
+# Gleicher dedizierter Logger wie in passive_controller.py - siehe dort fuer
+# die Begruendung, warum dieser separat vom allgemeinen log_level ist.
+ctrl_logger = logging.getLogger("marstek.control_logic")
+
 
 class MarstekBridge:
     def __init__(self, cfg: MarstekConfig):
@@ -380,9 +384,17 @@ class MarstekBridge:
             logger.warning("Ungueltiger Leistungswert auf %s: %r", topic, payload)
             return
 
+        ctrl_logger.debug("Shelly-Eingang (roh): %.1f W", raw_power,
+                           extra={"category": "CONTROLLOGIC"})
+
         # Entprellung: gleitender Mittelwert ueber das konfigurierte Fenster,
         # BEVOR der Wert in die Regellogik einfliesst.
         smoothed_power = self.shelly_averager.add(raw_power)
+        ctrl_logger.debug(
+            "Shelly-Eingang (entprellt, Fenster=%.0fs, %d Samples): %.1f W",
+            self.shelly_averager.window_s, self.shelly_averager.sample_count(), smoothed_power,
+            extra={"category": "CONTROLLOGIC"},
+        )
 
         # Zielwert fuer den Marstek = -Netzleistung (Netzbezug/-einspeisung auf 0 regeln)
         target = -smoothed_power

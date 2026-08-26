@@ -1,5 +1,5 @@
 name: "Marstek MQTT Bridge"
-version: "0.0.9"
+version: "0.0.10"
 slug: "marstek_bridge"
 description: >-
   Bruecke zwischen einem Marstek Energiespeicher (lokale UDP-API) und Home
@@ -74,6 +74,7 @@ options:
 
   logging_settings:
     log_level: "info"
+    debug_control_logic: false
 schema:
   marstek_device:
     device_ip: "str"
@@ -134,3 +135,4 @@ schema:
 
   logging_settings:
     log_level: "list(debug|info|warning|error)"
+    debug_control_logic: "bool"

@@ -55,16 +55,25 @@ class _Category(str, Enum):
     CONTROL = "CONTROL"
     INIT = "INIT"
     COMM = "COMM"
+    CONTROLLOGIC = "CONTROLLOGIC"  # Regler-internes Debugging (bridge.py/
+                                   # passive_controller.py), eigener Logger
+                                   # "marstek.control_logic", separat vom
+                                   # allgemeinen log_level schaltbar.
 
 
 class ColorCategoryFormatter(logging.Formatter):
-    """Faerbt Logzeilen je nach 'category' (extra={'category': ...}) ein."""
+    """Faerbt Logzeilen je nach 'category' (extra={'category': ...}) ein.
+    Andere Module koennen statt der Enum-Member auch einfache Strings
+    uebergeben (z.B. extra={'category': 'CONTROLLOGIC'}) - da _Category von
+    str erbt, sind Hash/Gleichheit identisch und die Dict-Lookup funktioniert
+    ohne dass diese Module von udp_client.py abhaengig sein muessen."""
 
     _COLORS = {
-        _Category.STATUS: "\033[36m",   # cyan (Standard-SGR statt "bright"-Variante
-        _Category.CONTROL: "\033[33m",  # gelb  fuer bessere Kompatibilitaet mit
-        _Category.INIT: "\033[35m",     # magenta ANSI->HTML-Konvertern, z.B. im
-        _Category.COMM: "\033[31m",     # rot   HA-Add-on-Log-Viewer)
+        _Category.STATUS: "\033[36m",       # cyan (Standard-SGR statt "bright"-Variante
+        _Category.CONTROL: "\033[33m",      # gelb  fuer bessere Kompatibilitaet mit
+        _Category.INIT: "\033[35m",         # magenta ANSI->HTML-Konvertern, z.B. im
+        _Category.COMM: "\033[31m",         # rot   HA-Add-on-Log-Viewer)
+        _Category.CONTROLLOGIC: "\033[32m", # gruen (Regler-Debugging)
     }
     _RESET = "\033[0m"
 

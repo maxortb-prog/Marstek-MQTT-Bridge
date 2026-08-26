@@ -42,15 +42,22 @@ def _load_options() -> dict:
         return json.load(f)
 
 
-def _setup_logging(log_level: str) -> None:
+def _setup_logging(log_level: str, debug_control_logic: bool) -> None:
     """Root-Logging mit Farbcodierung: magenta=Init, rot=Verbindungsstatus,
-    cyan=Status, gelb=Control (siehe udp_client.ColorCategoryFormatter).
-    Bestaetigt per Screenshot funktionsfaehig im HA-Add-on-Log-Tab (ANSI
-    wird dort tatsaechlich gerendert, nicht herausgefiltert - eine fruehere
-    Fehleinschaetzung anhand von kopiertem Text war falsch, da Copy-Paste
-    aus einer farbig gerenderten Weboberflaeche grundsaetzlich nie Farbe
-    mitkopieren kann). Andere Logger ohne 'category'-Extra werden
-    unveraendert (unfarbig) ausgegeben."""
+    cyan=Status, gelb=Control, gruen=ControlLogic (siehe
+    udp_client.ColorCategoryFormatter). Bestaetigt per Screenshot
+    funktionsfaehig im HA-Add-on-Log-Tab (ANSI wird dort tatsaechlich
+    gerendert, nicht herausgefiltert - eine fruehere Fehleinschaetzung
+    anhand von kopiertem Text war falsch, da Copy-Paste aus einer farbig
+    gerenderten Weboberflaeche grundsaetzlich nie Farbe mitkopieren kann).
+    Andere Logger ohne 'category'-Extra werden unveraendert (unfarbig)
+    ausgegeben.
+
+    Der 'marstek.control_logic'-Logger (Shelly-Rohwert, Entprellung,
+    errechnete Leistungsaenderung) wird bewusst UNABHAENGIG vom
+    allgemeinen log_level gesteuert: bei hoher Shelly-Update-Frequenz
+    wuerde er sonst automatisch bei log_level=debug den Rest des Logs
+    ueberfluten. Er bekommt daher seine eigene, explizite Logger-Ebene."""
     handler = logging.StreamHandler()
     handler.setFormatter(ColorCategoryFormatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s"))
     root = logging.getLogger()
@@ -58,12 +65,17 @@ def _setup_logging(log_level: str) -> None:
     root.addHandler(handler)
     root.setLevel(getattr(logging, log_level.upper(), logging.INFO))
 
+    ctrl_logic_logger = logging.getLogger("marstek.control_logic")
+    ctrl_logic_logger.setLevel(logging.DEBUG if debug_control_logic else logging.WARNING)
+
 
 async def _run() -> int:
     options = _load_options()
 
-    log_level = str(options.get("logging_settings", {}).get("log_level", "info")).upper()
-    _setup_logging(log_level)
+    logging_settings = options.get("logging_settings", {})
+    log_level = str(logging_settings.get("log_level", "info")).upper()
+    debug_control_logic = bool(logging_settings.get("debug_control_logic", False))
+    _setup_logging(log_level, debug_control_logic)
 
     overrides = build_overrides(
         options,

@@ -48,6 +48,12 @@ from typing import Optional, TypedDict
 
 logger = logging.getLogger("marstek.passive_controller")
 
+# Eigener, separat vom allgemeinen log_level schaltbarer Logger fuer
+# Regler-internes Debugging (siehe DOCS.md "Debugging - ControlLogic").
+# Erwartet hohe Frequenz -> bewusst getrennt, damit er nicht automatisch
+# mit aktiviert wird, nur weil log_level=debug gesetzt ist.
+ctrl_logger = logging.getLogger("marstek.control_logic")
+
 
 class PassiveCommand(TypedDict):
     power: int
@@ -169,11 +175,20 @@ class PassiveController:
 
         # Erstinitialisierung
         if st.committed_setpoint_w is None:
+            ctrl_logger.debug(
+                "Errechnete Leistungsaenderung: Initialwert %.1f W (roh=%.1f W)",
+                clamped, raw_target_w, extra={"category": "CONTROLLOGIC"},
+            )
             st.committed_setpoint_w = clamped
             return self._maybe_send(clamped, now, force=True, reason="initial")
 
         # 2) Totzone (bezogen auf den aktuellen internen Sollwert)
         deviation = clamped - st.committed_setpoint_w
+        ctrl_logger.debug(
+            "Errechnete Leistungsaenderung: %.1f W (aktueller Sollwert=%.1f W -> Ziel=%.1f W, roh=%.1f W)",
+            deviation, st.committed_setpoint_w, clamped, raw_target_w,
+            extra={"category": "CONTROLLOGIC"},
+        )
         if abs(deviation) <= cfg.deadzone_w and not hit_safety_limit:
             if keepalive_due:
                 logger.info(

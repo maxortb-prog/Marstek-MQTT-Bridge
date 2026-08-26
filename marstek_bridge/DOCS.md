@@ -139,6 +139,21 @@ HA-Add-on-Log-Tab. Zusätzlich stehen die Text-Tags
 Log-Ansicht (z. B. `docker logs` ohne TTY) ANSI-Codes einmal nicht
 rendert.
 
+### Debugging - ControlLogic (eigener Schalter, eigene Farbe)
+
+Die Option `debug_control_logic` (Standard: aus) aktiviert einen **separat
+vom allgemeinen `log_level` schaltbaren** Debug-Log-Kanal (**grün**) nur
+für die Interna der Passive-Mode-Regelschleife:
+
+- Shelly-Eingang (roh)
+- Shelly-Eingang (entprellt/gemittelt, inkl. Fenstergröße und Sample-Anzahl)
+- Errechnete Leistungsänderung pro Zyklus (aktueller Sollwert → Ziel)
+
+Bewusst getrennt von `log_level`, weil bei häufigen Shelly-Updates (z. B.
+alle 1-5s) hier sehr viele Zeilen anfallen können - das würde bei
+`log_level=debug` sonst das restliche Log fluten. Diese Option lässt sich
+unabhängig aktivieren, auch wenn `log_level` auf `info` steht.
+
 ## Entities in Home Assistant
 
 Nach dem ersten erfolgreichen Start erscheinen automatisch mehrere Geraete:
