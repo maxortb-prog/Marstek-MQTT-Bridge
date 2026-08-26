@@ -15,7 +15,6 @@ arch:
 init: false
 startup: services
 boot: auto
-watchdog: null
 services:
   - "mqtt:want"
 map:
