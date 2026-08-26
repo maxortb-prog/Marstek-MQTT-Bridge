@@ -75,7 +75,7 @@ def test_safety_clamp_overrides_holdoff_with_warning(caplog):
     print_results("Sicherheitsgrenze erzwingt Senden trotz Hold-off", results)
     assert results[1][2] is not None, "Sicherheitsgrenze muss trotz Hold-off senden"
     assert results[1][2]["power"] == 800
-    assert any("Sicherheitsgrenze" in rec.message for rec in caplog.records)
+    assert any("trotz Hold-off" in rec.message for rec in caplog.records)
 
 
 def test_min_setpoint_change_blocks_tiny_updates_even_without_holdoff():
@@ -187,3 +187,66 @@ if __name__ == "__main__":
     test_min_setpoint_change_blocks_tiny_updates_even_without_holdoff()
 
     print("\nAlle Demo-Checks OK.")
+
+
+def test_keepalive_resends_unchanged_setpoint_before_cd_time_expires():
+    """Kernanforderung: bleibt der Sollwert innerhalb der Totzone (kein
+    echtes Update noetig), muss trotzdem kurz vor Ablauf von cd_time
+    erneut gesendet werden, sonst verliert das Geraet seinen Passive-
+    Sollwert."""
+    cfg = PassiveControllerConfig(deadzone_w=40, min_setpoint_change_w=50, max_step_w=125,
+                                   min_send_interval_s=0, default_cd_time_s=60, max_cd_time_s=3600)
+    ctrl = PassiveController(cfg)
+
+    # Initiale Sendung bei t=0
+    cmd0 = ctrl.update(300, now=0.0)
+    assert cmd0 is not None and cmd0["power"] == 300
+
+    # t=10s: Wert bleibt praktisch gleich (innerhalb Totzone) -> kein Senden
+    assert ctrl.update(305, now=10.0) is None
+
+    # t=45s: cd_time=60s, Margin=max(5, 60*0.2)=12s -> Keepalive-Schwelle bei 60-12=48s
+    # noch nicht erreicht -> weiterhin kein Senden
+    assert ctrl.update(305, now=45.0) is None
+
+    # t=50s: Schwelle (48s) ueberschritten -> Keepalive muss trotz Totzone senden
+    cmd = ctrl.update(305, now=50.0)
+    assert cmd is not None, "Keepalive haette senden muessen, um cd_time zu resetten"
+    assert cmd["power"] == 300, "Keepalive sendet den unveraenderten Sollwert, nicht den neuen Rohwert"
+    assert cmd["cd_time"] == 60
+
+
+def test_keepalive_does_not_trigger_before_margin():
+    cfg = PassiveControllerConfig(deadzone_w=40, min_setpoint_change_w=50, max_step_w=125,
+                                   min_send_interval_s=0, default_cd_time_s=100, max_cd_time_s=3600)
+    ctrl = PassiveController(cfg)
+    ctrl.update(300, now=0.0)
+    # Margin = max(5, 100*0.2) = 20 -> Schwelle bei 80s
+    assert ctrl.update(305, now=79.0) is None
+    cmd = ctrl.update(305, now=81.0)
+    assert cmd is not None
+
+
+def test_keepalive_bypasses_holdoff():
+    """Keepalive muss auch dann senden, wenn der normale Mindestabstand
+    (min_send_interval_s) noch nicht erreicht ist - sonst koennte cd_time
+    trotzdem ablaufen."""
+    cfg = PassiveControllerConfig(deadzone_w=40, min_setpoint_change_w=50, max_step_w=125,
+                                   min_send_interval_s=55, default_cd_time_s=60, max_cd_time_s=3600)
+    ctrl = PassiveController(cfg)
+    ctrl.update(300, now=0.0)
+    # Keepalive-Schwelle bei 48s liegt VOR dem Hold-off-Ende bei 55s
+    cmd = ctrl.update(305, now=50.0)
+    assert cmd is not None, "Keepalive haette trotz Hold-off senden muessen"
+
+
+def test_no_keepalive_when_real_update_already_happening():
+    """Wenn ohnehin ein echtes Update ansteht, ist keine gesonderte
+    Keepalive-Logik noetig - der normale Sendepfad greift bereits."""
+    cfg = PassiveControllerConfig(deadzone_w=10, min_setpoint_change_w=10, max_step_w=2000,
+                                   min_send_interval_s=0, default_cd_time_s=60, max_cd_time_s=3600)
+    ctrl = PassiveController(cfg)
+    ctrl.update(300, now=0.0)
+    cmd = ctrl.update(600, now=5.0)  # deutliche Aenderung, weit vor cd_time-Ablauf
+    assert cmd is not None
+    assert cmd["power"] == 600

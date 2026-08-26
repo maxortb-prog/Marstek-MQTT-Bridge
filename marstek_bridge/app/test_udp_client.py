@@ -178,3 +178,93 @@ async def test_recovery_resets_comm_fail():
     finally:
         await client.close()
         server.stop()
+
+
+@pytest.mark.asyncio
+async def test_min_inter_message_delay_paces_consecutive_status_polls():
+    """Kernanforderung: aufeinanderfolgende STATUS-Nachrichten (z.B. mehrere
+    unabhaengige Poll-Loops, die zufaellig gleichzeitig feuern) muessen
+    mindestens den konfigurierten Abstand einhalten."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    server.set_behavior("Bat.GetStatus", MethodBehavior(result={"soc": 90}))
+    server.set_behavior("ES.GetMode", MethodBehavior(result={"mode": "Auto"}))
+
+    client = MarstekUDPClient(
+        "127.0.0.1", port,
+        runtime_policy=RuntimeRetryPolicy(timeout_s=1.0, max_retries=1),
+        min_inter_message_delay_s=0.5,
+    )
+    await client.connect()
+    try:
+        t0 = time.monotonic()
+        task1 = asyncio.ensure_future(client.send_status("Bat.GetStatus", {"id": 0}))
+        task2 = asyncio.ensure_future(client.send_status("ES.GetMode", {"id": 0}))
+        await task1
+        t_second_start = None
+        # zweite Anfrage muss erst nach dem Mindestabstand rausgehen
+        await task2
+        elapsed = time.monotonic() - t0
+        assert elapsed >= 0.5, f"Zweite Status-Nachricht kam zu frueh ({elapsed:.2f}s < 0.5s)"
+
+        send_calls = [r for r in server.received]
+        assert len(send_calls) == 2
+    finally:
+        await client.close()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_control_bypasses_min_inter_message_delay():
+    """Ein Control-Kommando darf NIE auf den Mindestabstand warten - es muss
+    sich sofort dazwischen einreihen koennen, auch waehrend eine Status-
+    Nachricht gerade auf den Mindestabstand wartet."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    server.set_behavior("Bat.GetStatus", MethodBehavior(result={"soc": 90}))
+    server.set_behavior("ES.SetMode", MethodBehavior(result={"set_result": True}))
+
+    client = MarstekUDPClient(
+        "127.0.0.1", port,
+        runtime_policy=RuntimeRetryPolicy(timeout_s=1.0, max_retries=1),
+        min_inter_message_delay_s=5.0,  # bewusst lang
+    )
+    await client.connect()
+    try:
+        t0 = time.monotonic()
+        await client.send_status("Bat.GetStatus", {"id": 0})  # setzt _last_send_monotonic
+
+        # sofort danach ein Control-Kommando -> darf NICHT 5s warten muessen
+        control_result = await client.send_control(
+            "ES.SetMode", {"id": 0, "config": {"mode": "Auto", "auto_cfg": {"enable": 1}}}
+        )
+        elapsed = time.monotonic() - t0
+        assert control_result["set_result"] is True
+        assert elapsed < 1.0, f"Control-Kommando wurde faelschlicherweise durch den Mindestabstand verzoegert ({elapsed:.2f}s)"
+    finally:
+        await client.close()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_min_inter_message_delay_zero_disables_pacing():
+    server = FakeMarstekServer()
+    port = await server.start()
+    server.set_behavior("Bat.GetStatus", MethodBehavior(result={"soc": 90}))
+    server.set_behavior("ES.GetMode", MethodBehavior(result={"mode": "Auto"}))
+
+    client = MarstekUDPClient(
+        "127.0.0.1", port,
+        runtime_policy=RuntimeRetryPolicy(timeout_s=1.0, max_retries=1),
+        min_inter_message_delay_s=0.0,
+    )
+    await client.connect()
+    try:
+        t0 = time.monotonic()
+        await client.send_status("Bat.GetStatus", {"id": 0})
+        await client.send_status("ES.GetMode", {"id": 0})
+        elapsed = time.monotonic() - t0
+        assert elapsed < 0.3, f"Ohne Pacing (0) sollte es schnell gehen, dauerte aber {elapsed:.2f}s"
+    finally:
+        await client.close()
+        server.stop()

@@ -188,6 +188,7 @@ class MarstekUDPClient:
         on_comm_state_change: Optional[Callable[[bool, bool], None]] = None,
         on_comm_fail_watchdog: Optional[Callable[[], Awaitable[None]]] = None,
         poll_interval_s: float = 0.05,
+        min_inter_message_delay_s: float = 0.0,
     ):
         self._host = host
         self._port = port
@@ -196,6 +197,13 @@ class MarstekUDPClient:
         self._on_comm_state_change = on_comm_state_change
         self._on_comm_fail_watchdog = on_comm_fail_watchdog
         self._poll_interval_s = poll_interval_s
+        # Mindestabstand zwischen zwei GESENDETEN Nachrichten (jeder Kategorie),
+        # um das Geraet nicht mit Nachrichten zu ueberrennen. Gilt NUR fuer die
+        # Auswahl der naechsten STATUS-Nachricht - Control-Kommandos werden
+        # davon nie aufgehalten und koennen sich jederzeit dazwischen einreihen.
+        # 0 = deaktiviert (kein Mindestabstand).
+        self._min_inter_message_delay_s = min_inter_message_delay_s
+        self._last_send_monotonic: Optional[float] = None
 
         self._id_counter = itertools.count(1)
         self._pending: dict[int, asyncio.Future] = {}
@@ -283,8 +291,29 @@ class MarstekUDPClient:
             if not self._control_queue.empty():
                 return self._control_queue.get_nowait()
             if not self._status_queue.empty():
+                if await self._wait_out_pacing_gap():
+                    # Waehrend des Wartens ist ein Control-Kommando aufgetaucht ->
+                    # von vorne pruefen, Control geht vor.
+                    continue
                 return self._status_queue.get_nowait()
             await asyncio.sleep(self._poll_interval_s)
+
+    async def _wait_out_pacing_gap(self) -> bool:
+        """Wartet, falls noetig, bis der konfigurierte Mindestabstand seit der
+        letzten GESENDETEN Nachricht (egal welcher Kategorie) verstrichen ist.
+        Gilt nur fuer die naechste STATUS-Nachricht - taucht waehrend des
+        Wartens ein Control-Kommando auf, wird SOFORT (True) zurueckgegeben,
+        damit der Aufrufer es vorlaesst, statt die volle Wartezeit abzusitzen.
+        Gibt False zurueck, wenn kein Warten (mehr) noetig war."""
+        if self._min_inter_message_delay_s <= 0 or self._last_send_monotonic is None:
+            return False
+        while True:
+            remaining = self._min_inter_message_delay_s - (self._loop.time() - self._last_send_monotonic)
+            if remaining <= 0:
+                return False
+            if not self._control_queue.empty():
+                return True
+            await asyncio.sleep(min(self._poll_interval_s, remaining))
 
     async def _drain_control_queue(self) -> None:
         """Wird zwischen zwei Retry-Versuchen einer Status-Abfrage aufgerufen:
@@ -329,6 +358,7 @@ class MarstekUDPClient:
 
             try:
                 self._transport.sendto(json.dumps(request).encode("utf-8"))
+                self._last_send_monotonic = self._loop.time()
                 result = await asyncio.wait_for(response_future, timeout=timeout)
                 logger.debug("RECV [%s] id=%s result=%s", category_label.value, req_id, result,
                              extra={"category": category_label})

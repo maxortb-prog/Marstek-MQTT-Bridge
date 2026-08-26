@@ -67,6 +67,10 @@ DEFAULT_CONFIG: dict = {
     "message_settings": {
         "max_retry": 3,
         "timeout_s": 1.0,
+        "min_inter_message_delay_s": 2.0,  # Mindestabstand zw. Nachrichten,
+                                           # egal welcher Kategorie (0 = aus).
+                                           # Control-Kommandos werden davon
+                                           # NIE aufgehalten, siehe udp_client.py.
     },
     # ── Initphase Settings ────────────────────────────────────────────────
     "init": {
@@ -87,6 +91,9 @@ DEFAULT_CONFIG: dict = {
     },
     "shelly": {
         "power_topic": "",  # z.B. "shellies/shellyem/emeter/0/power" - leer = deaktiviert
+        "debounce_time_s": 10.0,  # Mittelungsfenster zur Entprellung des rohen
+                                  # Eingangssignals, BEVOR es in die Regellogik
+                                  # (passive_controller.py) einfliesst. 0 = aus.
     },
 }
 
@@ -154,6 +161,8 @@ class MarstekConfig:
         ms = self._data["message_settings"]
         if not (0 <= int(ms["max_retry"]) <= 10):
             raise ConfigError("message_settings.max_retry muss zwischen 0 und 10 liegen")
+        if not (0 <= float(ms.get("min_inter_message_delay_s", 0)) <= 30):
+            raise ConfigError("message_settings.min_inter_message_delay_s muss zwischen 0 und 30 liegen")
 
         ctrl = self._data["controller"]
         if not (0 <= float(ctrl["min_send_interval_s"]) <= 60):
@@ -172,6 +181,10 @@ class MarstekConfig:
                 "Entlade-/Einspeiseleistung, keine vorzeichenbehaftete Sollwertvorgabe (0 ist gueltig "
                 "und bedeutet: Entladen im Passive-Mode vollstaendig sperren)"
             )
+
+        shelly = self._data["shelly"]
+        if not (0 <= float(shelly.get("debounce_time_s", 0)) <= 300):
+            raise ConfigError("shelly.debounce_time_s muss zwischen 0 und 300 liegen")
 
         dod = self._data["dod"]["startup_value"]
         if not (30 <= int(dod) <= 88):

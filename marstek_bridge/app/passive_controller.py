@@ -129,6 +129,19 @@ class PassiveController:
         raw = self._cd_time_override_s if self._cd_time_override_s is not None else self.config.default_cd_time_s
         return min(int(raw), self.config.max_cd_time_s)
 
+    def _is_keepalive_due(self, now: float) -> bool:
+        """True, wenn kurz vor Ablauf der geraeteseitigen cd_time erneut
+        gesendet werden muss, OBWOHL Totzone/Mindeständerung eigentlich
+        kein Update verlangen wuerden. Sonst wuerde das Geraet nach Ablauf
+        von cd_time keinen aktiven Passive-Sollwert mehr haben (siehe API-
+        Doku: cd_time ist ein Countdown, nach dessen Ablauf ohne neues
+        Kommando das Geraet den Passive-Sollwert nicht mehr haelt)."""
+        if self.state.last_send_monotonic is None:
+            return False
+        cd_time = self._effective_cd_time_s()
+        margin = max(5.0, cd_time * 0.2)  # 20%, mind. 5s Sicherheitsabstand
+        return (now - self.state.last_send_monotonic) >= (cd_time - margin)
+
     def update(self, raw_target_w: float, *, now: Optional[float] = None) -> Optional[PassiveCommand]:
         """
         Bei jeder neuen Messung aufrufen (empfohlen: alle ~5s).
@@ -152,15 +165,23 @@ class PassiveController:
         # 1) Sicherheits-Clamp (inkl. dynamischem Entlade-Deckel)
         clamped = max(cfg.min_output_w, min(effective_max, raw_target_w))
         hit_safety_limit = clamped != raw_target_w
+        keepalive_due = self._is_keepalive_due(now)
 
         # Erstinitialisierung
         if st.committed_setpoint_w is None:
             st.committed_setpoint_w = clamped
-            return self._maybe_send(clamped, now, hit_safety_limit, reason="initial")
+            return self._maybe_send(clamped, now, force=True, reason="initial")
 
         # 2) Totzone (bezogen auf den aktuellen internen Sollwert)
         deviation = clamped - st.committed_setpoint_w
         if abs(deviation) <= cfg.deadzone_w and not hit_safety_limit:
+            if keepalive_due:
+                logger.info(
+                    "Keepalive: cd_time laeuft bald ab - Sollwert %.0fW unveraendert "
+                    "erneut gesendet, um den Countdown zurueckzusetzen",
+                    st.committed_setpoint_w,
+                )
+                return self._maybe_send(st.committed_setpoint_w, now, force=True, reason="keepalive")
             logger.debug(
                 "Totzone: |%.1f W| <= %.1f W -> ignoriert (Sollwert bleibt %.0f W)",
                 deviation, cfg.deadzone_w, st.committed_setpoint_w,
@@ -177,6 +198,13 @@ class PassiveController:
         if st.last_sent_setpoint_w is not None and not hit_safety_limit:
             change_vs_sent = abs(new_committed - st.last_sent_setpoint_w)
             if change_vs_sent < cfg.min_setpoint_change_w:
+                if keepalive_due:
+                    logger.info(
+                        "Keepalive: cd_time laeuft bald ab - Sollwert %.0fW unveraendert "
+                        "erneut gesendet, um den Countdown zurueckzusetzen",
+                        new_committed,
+                    )
+                    return self._maybe_send(new_committed, now, force=True, reason="keepalive")
                 logger.debug(
                     "Mindeständerung nicht erreicht: %.1f W < %.1f W -> kein Senden "
                     "(intern bei %.0f W)",
@@ -184,10 +212,10 @@ class PassiveController:
                 )
                 return None
 
-        return self._maybe_send(new_committed, now, hit_safety_limit, reason="update")
+        return self._maybe_send(new_committed, now, force=(hit_safety_limit or keepalive_due), reason="update")
 
     def _maybe_send(
-        self, power_w: float, now: float, hit_safety_limit: bool, reason: str
+        self, power_w: float, now: float, force: bool, reason: str
     ) -> Optional[PassiveCommand]:
         cfg = self.config
         st = self.state
@@ -199,18 +227,17 @@ class PassiveController:
             or elapsed >= cfg.min_send_interval_s
         )
 
-        if not interval_satisfied and not hit_safety_limit:
+        if not interval_satisfied and not force:
             logger.debug(
                 "Hold-off aktiv: erst %.1fs seit letzter Sendung (Minimum %.1fs) -> warte",
                 elapsed, cfg.min_send_interval_s,
             )
             return None
 
-        if not interval_satisfied and hit_safety_limit:
+        if not interval_satisfied and force:
             logger.warning(
-                "%s | Sicherheitsgrenze erreicht - Kommando wird trotz Hold-off bereits "
-                "nach %.1fs (Minimum %.1fs) gesendet. power=%.0fW",
-                time.strftime("%Y-%m-%d %H:%M:%S"), elapsed, cfg.min_send_interval_s, power_w,
+                "%s | [%s] trotz Hold-off bereits nach %.1fs (Minimum %.1fs) gesendet. power=%.0fW",
+                time.strftime("%Y-%m-%d %H:%M:%S"), reason, elapsed, cfg.min_send_interval_s, power_w,
             )
 
         power_int = int(round(power_w))

@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.0.9
+
+- **cd_time-Keepalive**: Der Passive-Regler sendet jetzt automatisch ein
+  Kommando mit unveraendertem Sollwert kurz bevor die geraeteseitige
+  `cd_time` ablaeuft (Schwelle: 20% Marge, mind. 5s), selbst wenn Totzone/
+  Mindeständerung sonst kein Update verlangen wuerden. Ohne dieses
+  Verhalten haette das Geraet nach Ablauf von `cd_time` ohne neues
+  Kommando seinen Passive-Sollwert verloren. Bypasst dafuer auch den
+  Hold-off-Timer (`min_send_interval_s`).
+- **Eingangsentprellung fuer `shelly_power_topic`** (neues Modul
+  `input_averager.py`): der rohe externe Leistungsmesswert wird jetzt vor
+  der Regellogik ueber ein konfigurierbares Zeitfenster gemittelt
+  (`shelly_debounce_time_s`, Standard 10s, 0 = aus). Neue Option in der
+  Gruppe "Selfconsumption Control Parameters for Passive Mode", neue
+  HA-Entity `number.shelly_debounce_time_s` (live aenderbar), wird beim
+  manuellen (Re-)Aktivieren des Passive-Mode automatisch zurueckgesetzt.
+- **Neuer konfigurierbarer Mindestabstand zwischen Nachrichten**
+  (`message_settings.min_inter_message_delay_s`, Standard 2.0s): verhindert,
+  dass mehrere unabhaengige Status-Poll-Loops (Bat.GetStatus, ES.GetMode,
+  ES.GetStatus) zufaellig praktisch gleichzeitig beim Geraet ankommen
+  (in der Praxis beobachtet: 1ms Abstand zwischen aufeinanderfolgenden
+  Abfragen). **Control-Kommandos werden davon nie aufgehalten** - sie
+  duerfen sich laut Test jederzeit sofort dazwischen einreihen, auch
+  waehrend eine Status-Abfrage auf den Mindestabstand wartet.
+- **Korrektur einer Fehleinschaetzung**: Ein per Screenshot bestaetigter
+  Test zeigt, dass ANSI-Farbcodierung im HA-Add-on-Log-Tab tatsaechlich
+  funktioniert. Die vorherige Annahme, ANSI wuerde herausgefiltert,
+  basierte auf per Copy-Paste kopiertem Logtext - Copy-Paste aus einer
+  farbig gerenderten Weboberflaeche kann grundsaetzlich nie Farbe
+  mitkopieren. Die zwischenzeitlich entfernte ANSI-Faerbung ist wieder
+  aktiviert.
+
 ## 0.0.8
 
 - ANSI-Farbcodes von "hellen" SGR-Codes (90-97) auf **Standard-SGR-Codes

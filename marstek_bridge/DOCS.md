@@ -87,6 +87,7 @@ reagieren.
 | `max_output_w` | 800 | Harte Einspeisegrenze - der Marstek koennte physisch mehr, das ist eine bewusste Zusatzbegrenzung. Der `power`-Deckel (siehe "Passiv Mode Settings") kann diese Grenze nur verschaerfen, nie ueberschreiten. |
 | `min_send_interval_s` | 30 | Mindestabstand zwischen zwei Sendungen, 0-60s (0 = kein Mindestabstand) |
 | `shelly_power_topic` | (leer) | MQTT-Topic einer externen Leistungsmessung (z.B. Shelly EM), treibt den automatischen Regler an. Leer = Regler deaktiviert, nur manuelle Passive-Steuerung ueber HA moeglich |
+| `shelly_debounce_time_s` | 10.0 | Mittelungsfenster (Sekunden, 0-300, 0 = deaktiviert) fuer den rohen Leistungswert, BEVOR er in die Regellogik einfliesst - glaettet kurze Ausreisser/Rauschen. Zur Laufzeit ueber `number.shelly_debounce_time_s` aenderbar; wird beim (erneuten) manuellen Wechsel in den Passive-Mode automatisch zurueckgesetzt (frische Mittelung, alte Samples verworfen). |
 
 ### Abschnitt "Message Settings"
 
@@ -94,6 +95,7 @@ reagieren.
 |---|---|---|
 | `max_retry` | 3 | Max. Wiederholungen im laufenden Betrieb (0-10), danach `communication_fail` |
 | `timeout_s` | 1.0 | Timeout pro Versuch im laufenden Betrieb |
+| `min_inter_message_delay_s` | 2.0 | Mindestabstand zwischen zwei GESENDETEN Nachrichten, egal welcher Art (0-30s, 0 = deaktiviert). Verhindert, dass mehrere unabhaengige Status-Abfragen (Bat/ES.GetMode/ES.GetStatus) zufaellig praktisch gleichzeitig beim Geraet landen. **Control-Kommandos werden davon nie aufgehalten** - sie duerfen sich jederzeit sofort dazwischen einreihen, dieser Wert bremst ausschliesslich aufeinanderfolgende Status-Abfragen. |
 
 ### Abschnitt "Init Settings"
 
@@ -131,9 +133,11 @@ UDP-Kommunikation farblich unterschieden ausgegeben: **gelb** = Control-
 Kommandos (ES.SetMode, DOD.SET, Ble.Adv, Led.Ctrl), **cyan** = Status-
 Abfragen (Bat.GetStatus, ES.GetStatus, ES.GetMode), **magenta** = Init-
 Sequenz, **rot** = Verbindungsstatus-Meldungen (Communication
-established/Fail). Sichtbar z. B. über `ha addons logs marstek_bridge`
-oder `docker logs` - der Log-Viewer im HA-Frontend selbst stellt ANSI-
-Farbcodes je nach Version ggf. nicht dar.
+established/Fail). Per Screenshot bestätigt funktionsfähig im
+HA-Add-on-Log-Tab. Zusätzlich stehen die Text-Tags
+`[STATUS]`/`[CONTROL]`/`[INIT]` direkt in der Nachricht selbst, falls eine
+Log-Ansicht (z. B. `docker logs` ohne TTY) ANSI-Codes einmal nicht
+rendert.
 
 ## Entities in Home Assistant
 
@@ -159,6 +163,7 @@ Wichtige Control-Entities fuer den Passive-Mode:
   `sensor.battery_soc` koppeln: hoher SOC -> Deckel hoch (bis max.
   `max_output_w`), niedriger SOC -> Deckel absenken.
 - `number.passive_cd_time` - die Nachlaufzeit/Countdown fuer Passive-Kommandos.
+- `number.shelly_debounce_time_s` - Mittelungsfenster fuer die Entprellung des externen Leistungssignals.
 - `select.energy_mode` - Auto/AI/Passive/Ups (Manual wird bewusst nicht
   unterstuetzt).
 
@@ -180,3 +185,8 @@ aktiviert werden.
 - Die gruppierten Konfigurationsabschnitte setzen HA Supervisor >= 2025.10
   voraus. Auf aelteren Installationen ist das Rendering der Abschnitte
   nicht getestet.
+- Der Passive-Regler sendet jetzt automatisch ein "Keepalive"-Kommando
+  (unveraenderter Sollwert) kurz bevor die geraeteseitige `cd_time`
+  ablaeuft, damit der Passive-Sollwert nicht verloren geht, wenn sich
+  ueber laengere Zeit kein echtes Update ergibt. Dieses Verhalten ist
+  nicht abschaltbar.

@@ -30,7 +30,7 @@ configuration:
     fields:
       log_level:
         name: "Log level"
-        description: "'debug' also colorizes control/status/init lines (yellow=control, cyan=status, magenta=init, red=connection)."
+        description: "'debug' also colorizes control/status/init lines (yellow=control, cyan=status, magenta=init, red=connection) and shows [STATUS]/[CONTROL]/[INIT] tags as a fallback."
   mqtt_port:
     name: "MQTT port (override)"
     description: "Only needed if not using the Mosquitto add-on with service discovery. Leave empty for auto-detection."
@@ -88,6 +88,9 @@ configuration:
       shelly_power_topic:
         name: "External power measurement topic"
         description: "MQTT topic of an external power measurement (e.g. Shelly EM) driving the automatic controller. Leave empty to disable automatic regulation (manual Passive control via Home Assistant still works)."
+      shelly_debounce_time_s:
+        name: "Input debounce time"
+        description: "Moving-average window (seconds, 0-300, 0 = disabled) applied to the raw external power reading BEFORE it enters the control logic - smooths out short spikes/noise. Adjustable live via number.shelly_debounce_time_s, and reset whenever Passive mode is (re-)selected manually."
 
   message_settings:
     name: "Message Settings"
@@ -98,6 +101,10 @@ configuration:
         description: "Maximum retries before the command is considered failed (Communication Fail), 0-10."
       timeout_s:
         name: "Timeout"
+        description: "Timeout per attempt, in seconds."
+      min_inter_message_delay_s:
+        name: "Minimum delay between messages"
+        description: "Minimum time between two SENT messages of any kind (0-30s, 0 = disabled). Control commands (mode changes, DOD, LED, Bluetooth) always bypass this delay and are sent immediately - it only paces status polls."
         description: "Timeout per attempt, in seconds."
 
   init_settings:

@@ -52,7 +52,7 @@ def _test_config(tmp_path, device_port, **overrides):
                     "mqtt_username": "", "mqtt_password": ""},
         "init": {"base_timeout_s": 0.2, "timeout_increment_s": 0.1, "max_retries": 2,
                  "inter_command_delay_s": 0.0},
-        "message_settings": {"timeout_s": 0.3, "max_retry": 2},
+        "message_settings": {"timeout_s": 0.3, "max_retry": 2, "min_inter_message_delay_s": 0},
         "status_polling": {"bat_status_interval_s": 999999, "es_mode_interval_s": 999999,
                             "es_status_interval_s": 0.3},
         "controller": {"deadzone_w": 5, "min_setpoint_change_w": 5, "max_step_w": 2000,
@@ -327,6 +327,73 @@ async def test_manual_passive_select_uses_live_power_not_static_config(tmp_path)
                           if r["method"] == "ES.SetMode" and r["params"]["config"]["mode"] == "Passive"]
         assert passive_calls
         assert passive_calls[-1]["params"]["config"]["passive_cfg"]["power"] == 222
+    finally:
+        await bridge.stop()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_shelly_debounce_smooths_noisy_readings(tmp_path):
+    """Kernanforderung: mehrere kurz aufeinanderfolgende Shelly-Werte werden
+    ueber das konfigurierte Entprell-Fenster gemittelt, bevor sie in die
+    Regellogik einfliessen - ein einzelner Ausreisser darf nicht direkt
+    durchschlagen."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    cfg = _test_config(tmp_path, port, shelly={
+        "power_topic": "shellies/em/power", "debounce_time_s": 30,
+    }, passive_mode={"power": 1500, "cd_time": 60, "max_cd_time": 3600})
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+        assert bridge.shelly_averager.window_s == 30
+
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="shelly-sim-debounce") as shelly:
+            await shelly.publish("shellies/em/power", "-100", qos=0)
+            await asyncio.sleep(0.05)
+            await shelly.publish("shellies/em/power", "-100", qos=0)
+            await asyncio.sleep(0.05)
+            # kurzer Ausreisser
+            await shelly.publish("shellies/em/power", "-2000", qos=0)
+        await asyncio.sleep(0.4)
+
+        passive_calls = [r for r in server.received
+                          if r["method"] == "ES.SetMode" and r["params"]["config"]["mode"] == "Passive"]
+        assert passive_calls, "Passive-Regler haette senden muessen"
+        last_power = passive_calls[-1]["params"]["config"]["passive_cfg"]["power"]
+        # Mittelwert aus (-100,-100,-2000)/3 = -733 (Ziel=+733), NICHT der volle
+        # Ausreisser-Zielwert von +2000
+        assert last_power != 2000
+        assert 600 <= last_power <= 800, f"unerwarteter gemittelter Wert: {last_power}"
+    finally:
+        await bridge.stop()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_shelly_debounce_time_live_adjustable_via_ha(tmp_path):
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    cfg = _test_config(tmp_path, port, shelly={
+        "power_topic": "shellies/em/power", "debounce_time_s": 30,
+    })
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+        assert bridge.shelly_averager.window_s == 30
+
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="ha-sim-debounce") as ha:
+            await ha.publish("Marstek-Bridge-Control/shelly_debounce_time_s/set", "5", qos=1)
+        await asyncio.sleep(0.2)
+
+        assert bridge.shelly_averager.window_s == 5
+        assert bridge._shelly_debounce_time_s == 5.0
     finally:
         await bridge.stop()
         server.stop()

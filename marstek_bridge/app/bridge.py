@@ -30,6 +30,7 @@ from typing import Optional
 
 from config import MarstekConfig
 from entities import EntityBundle, build_entities
+from input_averager import InputAverager
 from mqtt_ha import HAEntity, HAMqttBridge
 from passive_controller import PassiveController, PassiveControllerConfig
 from startup import run_startup_sequence
@@ -51,6 +52,7 @@ class MarstekBridge:
         self.mqtt: Optional[HAMqttBridge] = None
         self.bundle: Optional[EntityBundle] = None
         self.passive_ctrl: Optional[PassiveController] = None
+        self.shelly_averager: Optional[InputAverager] = None
 
         self._poll_tasks: list[asyncio.Task] = []
         self._countdown_task: Optional[asyncio.Task] = None
@@ -82,6 +84,7 @@ class MarstekBridge:
             ),
             on_comm_state_change=self._on_comm_state_change,
             on_comm_fail_watchdog=self._on_watchdog,
+            min_inter_message_delay_s=msg_cfg.get("min_inter_message_delay_s", 0.0),
         )
         await self.udp.connect()
 
@@ -104,8 +107,6 @@ class MarstekBridge:
         for entity in self.bundle.entities.values():
             await self.mqtt.register_entity(entity)
 
-        await self._publish_startup_values(startup_result)
-
         ctrl_cfg = self.cfg.raw["controller"]
         pm_cfg = self.cfg.raw["passive_mode"]
         self.passive_ctrl = PassiveController(PassiveControllerConfig(
@@ -126,6 +127,12 @@ class MarstekBridge:
         self._passive_cd_time = int(pm_cfg["cd_time"])
         self.passive_ctrl.set_discharge_cap(self._passive_power_cap)
         self.passive_ctrl.set_cd_time(self._passive_cd_time)
+
+        shelly_cfg = self.cfg.raw["shelly"]
+        self._shelly_debounce_time_s = float(shelly_cfg.get("debounce_time_s", 0.0))
+        self.shelly_averager = InputAverager(window_s=self._shelly_debounce_time_s)
+
+        await self._publish_startup_values(startup_result)
 
         await self.mqtt.publish_state(self.bundle.entities["udp_connection"], self.udp.comm_established)
         await self.mqtt.publish_state(self.bundle.entities["communication_fail"], self.udp.comm_fail)
@@ -208,6 +215,7 @@ class MarstekBridge:
                                        self.cfg.get("passive_mode", "power", default=50))
         await self.mqtt.publish_state(e["passive_cd_time"],
                                        self.cfg.get("passive_mode", "cd_time", default=60))
+        await self.mqtt.publish_state(e["shelly_debounce_time_s"], self._shelly_debounce_time_s)
         ble_broadcast_on = int(self.cfg.get("ble_block", "startup_enable", default=0)) == 0
         await self.mqtt.publish_state(e["ble_broadcast"], ble_broadcast_on)
         led_on = int(self.cfg.get("led", "startup_state", default=0)) == 1
@@ -274,6 +282,8 @@ class MarstekBridge:
                 await self._handle_passive_power_cap(payload)
             elif entity.object_id == "passive_cd_time":
                 await self._handle_passive_cd_time(payload)
+            elif entity.object_id == "shelly_debounce_time_s":
+                await self._handle_shelly_debounce_time(payload)
             else:
                 logger.warning("Kein Handler fuer Kommando auf '%s' registriert", entity.object_id)
         except MarstekCommunicationError:
@@ -300,6 +310,17 @@ class MarstekBridge:
         self._passive_cd_time = value
         self.passive_ctrl.set_cd_time(value)
         await self.mqtt.publish_state(self.bundle.entities["passive_cd_time"], value)
+
+    async def _handle_shelly_debounce_time(self, payload: str) -> None:
+        """Aendert das Mittelungsfenster fuer die Shelly-Entprellung live.
+        Wirkt sofort auf den naechsten eingehenden Messwert."""
+        value = float(payload)
+        if value < 0:
+            logger.warning("Negativer Wert fuer shelly_debounce_time_s (%s) ignoriert", payload)
+            return
+        self._shelly_debounce_time_s = value
+        self.shelly_averager.set_window(value)
+        await self.mqtt.publish_state(self.bundle.entities["shelly_debounce_time_s"], value)
 
     async def _handle_dod(self, payload: str) -> None:
         value = int(float(payload))
@@ -335,6 +356,11 @@ class MarstekBridge:
             cd_time = self._passive_cd_time
             config = {"mode": "Passive", "passive_cfg": {"power": int(power), "cd_time": int(cd_time)}}
             self._start_countdown(cd_time)
+            # Entprellungs-Fenster bei jedem (erneuten) manuellen Wechsel in
+            # den Passive-Mode zuruecksetzen, damit alte Samples aus einer
+            # vorherigen Phase nicht die erste Mittelung verfaelschen.
+            if self.shelly_averager is not None:
+                self.shelly_averager.reset()
         else:
             logger.warning("Unbekannter Energy-Mode '%s' ignoriert (Manual wird bewusst nicht unterstuetzt)", mode)
             return
@@ -354,8 +380,12 @@ class MarstekBridge:
             logger.warning("Ungueltiger Leistungswert auf %s: %r", topic, payload)
             return
 
+        # Entprellung: gleitender Mittelwert ueber das konfigurierte Fenster,
+        # BEVOR der Wert in die Regellogik einfliesst.
+        smoothed_power = self.shelly_averager.add(raw_power)
+
         # Zielwert fuer den Marstek = -Netzleistung (Netzbezug/-einspeisung auf 0 regeln)
-        target = -raw_power
+        target = -smoothed_power
         cmd = self.passive_ctrl.update(target)
         if cmd is None:
             return

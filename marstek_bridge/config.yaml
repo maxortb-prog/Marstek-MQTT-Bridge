@@ -1,5 +1,5 @@
 name: "Marstek MQTT Bridge"
-version: "0.0.8"
+version: "0.0.9"
 slug: "marstek_bridge"
 description: >-
   Bruecke zwischen einem Marstek Energiespeicher (lokale UDP-API) und Home
@@ -47,10 +47,12 @@ options:
     max_output_w: 800
     min_send_interval_s: 30
     shelly_power_topic: ""
+    shelly_debounce_time_s: 10.0
 
   message_settings:
     max_retry: 3
     timeout_s: 1.0
+    min_inter_message_delay_s: 2.0
 
   init_settings:
     base_timeout_s: 2.0
@@ -100,10 +102,12 @@ schema:
     max_output_w: "int(0,1500)"
     min_send_interval_s: "int(0,60)"
     shelly_power_topic: "str?"
+    shelly_debounce_time_s: "float(0,300)"
 
   message_settings:
     max_retry: "int(0,10)"
     timeout_s: "float(0.1,10)"
+    min_inter_message_delay_s: "float(0,30)"
 
   init_settings:
     base_timeout_s: "float(0.1,30)"

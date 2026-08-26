@@ -43,9 +43,14 @@ def _load_options() -> dict:
 
 
 def _setup_logging(log_level: str) -> None:
-    """Root-Logging mit Farbcodierung: gelb=Control, cyan=Status, magenta=Init,
-    rot=Verbindungsstatus (siehe udp_client.ColorCategoryFormatter). Andere
-    Logger ohne 'category'-Extra werden unveraendert (unfarbig) ausgegeben."""
+    """Root-Logging mit Farbcodierung: magenta=Init, rot=Verbindungsstatus,
+    cyan=Status, gelb=Control (siehe udp_client.ColorCategoryFormatter).
+    Bestaetigt per Screenshot funktionsfaehig im HA-Add-on-Log-Tab (ANSI
+    wird dort tatsaechlich gerendert, nicht herausgefiltert - eine fruehere
+    Fehleinschaetzung anhand von kopiertem Text war falsch, da Copy-Paste
+    aus einer farbig gerenderten Weboberflaeche grundsaetzlich nie Farbe
+    mitkopieren kann). Andere Logger ohne 'category'-Extra werden
+    unveraendert (unfarbig) ausgegeben."""
     handler = logging.StreamHandler()
     handler.setFormatter(ColorCategoryFormatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s"))
     root = logging.getLogger()

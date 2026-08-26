@@ -102,6 +102,7 @@ def build_overrides(options: dict, *, mqtt_host_override: Optional[str] = None,
         "message_settings": {
             "max_retry": int(msg.get("max_retry", 3)),
             "timeout_s": float(msg.get("timeout_s", 1.0)),
+            "min_inter_message_delay_s": float(msg.get("min_inter_message_delay_s", 2.0)),
         },
         "init": {
             "base_timeout_s": float(init.get("base_timeout_s", 2.0)),
@@ -112,7 +113,10 @@ def build_overrides(options: dict, *, mqtt_host_override: Optional[str] = None,
         "dod": {"startup_value": int(dod.get("startup_value", 88))},
         "led": {"startup_state": int(extra.get("led_startup_state", 0))},
         "ble_block": {"startup_enable": int(extra.get("ble_block_startup_enable", 0))},
-        "shelly": {"power_topic": ctrl.get("shelly_power_topic", "") or ""},
+        "shelly": {
+            "power_topic": ctrl.get("shelly_power_topic", "") or "",
+            "debounce_time_s": float(ctrl.get("shelly_debounce_time_s", 10.0)),
+        },
     }
 
 

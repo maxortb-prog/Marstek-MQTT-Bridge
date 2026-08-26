@@ -188,6 +188,8 @@ def build_entities(cfg: MarstekConfig, ble_mac: str, device_type: str) -> Entity
     add(HAEntity("sensor", "passive_last_sent_power", "Passive Last Sent Power",
                  es_control_dev, unit_of_measurement="W", device_class="power",
                  state_class="measurement"))
+    add(HAEntity("number", "shelly_debounce_time_s", "Shelly Input Debounce Time", es_control_dev,
+                 unit_of_measurement="s", icon="mdi:sine-wave", min_value=0, max_value=300, step=1))
 
     return EntityBundle(
         hub_device=hub,
