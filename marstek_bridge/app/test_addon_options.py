@@ -11,9 +11,9 @@ from config import MarstekConfig
 
 def _minimal_options(**overrides):
     """Baut ein minimales, verschachteltes options.json-Aequivalent.
-    'overrides' erlaubt es, einzelne Gruppen oder Top-Level-Felder gezielt
-    zu ueberschreiben, z.B. _minimal_options(message_settings={"max_retry": 5})."""
-    base = {"device_ip": "192.168.0.45", "device_udp_port": 30000}
+    'overrides' erlaubt es, einzelne Gruppen gezielt zu ueberschreiben,
+    z.B. _minimal_options(message_settings={"max_retry": 5})."""
+    base = {"marstek_device": {"device_ip": "192.168.0.45", "device_udp_port": 30000}}
     base.update(overrides)
     return base
 
@@ -38,9 +38,12 @@ def test_build_overrides_produces_a_config_that_passes_validation():
 
 
 def test_missing_groups_fall_back_to_defaults():
-    """Fehlen ganze Gruppen im options.json (z.B. bei einem alten/minimalen
-    Setup), duerfen build_overrides nicht mit KeyError abstuerzen."""
-    overrides = build_overrides({"device_ip": "10.0.0.1", "device_udp_port": 30000})
+    """Fehlen ANDERE Gruppen im options.json (marstek_device bleibt
+    Pflicht, da device_ip/device_udp_port keine sinnvollen Defaults haben),
+    duerfen build_overrides nicht mit KeyError abstuerzen."""
+    overrides = build_overrides({
+        "marstek_device": {"device_ip": "10.0.0.1", "device_udp_port": 30000}
+    })
     assert overrides["status_polling"]["bat_status_interval_s"] == 3600
     assert overrides["init"]["timeout_increment_s"] == 10.0
 
@@ -66,14 +69,16 @@ def test_manual_mqtt_host_in_options_wins_over_discovery():
         mqtt_port_override=1884,
     )
     assert overrides["general"]["mqtt_host"] == "external.broker.example"
-    # mqtt_port liegt bewusst NICHT in der mqtt_settings-Gruppe (siehe Kommentar
-    # in addon_options.py), sondern bleibt top-level
-    overrides2 = build_overrides(
-        _minimal_options(mqtt_port=8883),
+
+
+def test_manual_mqtt_port_wins_over_discovery():
+    # mqtt_port liegt bewusst NICHT in der mqtt_settings-Gruppe, sondern top-level
+    overrides = build_overrides(
+        {**_minimal_options(), "mqtt_port": 8883},
         mqtt_host_override="core-mosquitto.local",
         mqtt_port_override=1884,
     )
-    assert overrides2["general"]["mqtt_port"] == 8883
+    assert overrides["general"]["mqtt_port"] == 8883
 
 
 def test_apply_persisted_discovery_fills_empty_fields_only(tmp_path):
@@ -89,8 +94,10 @@ def test_apply_persisted_discovery_fills_empty_fields_only(tmp_path):
 
 
 def test_apply_persisted_discovery_does_not_override_explicit_option():
-    overrides = build_overrides(_minimal_options(device_ble_mac="112233445566"))
-
+    overrides = build_overrides(_minimal_options(
+        marstek_device={"device_ip": "192.168.0.45", "device_udp_port": 30000,
+                         "device_ble_mac": "112233445566"}
+    ))
     # State-Datei existiert nicht -> darf nichts aendern
     apply_persisted_discovery(overrides, Path("/nonexistent/path.yaml"))
     assert overrides["general"]["device_ble_mac"] == "112233445566"
@@ -114,9 +121,12 @@ def test_mqtt_settings_group_maps_host_username_password():
 
 def test_full_nested_options_set_maps_correctly_and_validates():
     options = _minimal_options(
-        device_ble_mac="", device_type="",
-        mqtt_discovery_prefix="homeassistant", mqtt_base_topic="Marstek-Bridge-Control",
-        mqtt_suggested_area="Keller",
+        marstek_device={
+            "device_ip": "192.168.0.45", "device_udp_port": 30000,
+            "device_ble_mac": "", "device_type": "",
+            "mqtt_discovery_prefix": "homeassistant", "mqtt_base_topic": "Marstek-Bridge-Control",
+            "mqtt_suggested_area": "Keller",
+        },
         scanrate_statuscalls={
             "bat_status_interval_s": 1800, "es_mode_interval_s": 600, "es_status_interval_s": 120,
         },

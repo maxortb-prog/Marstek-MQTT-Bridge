@@ -57,7 +57,7 @@ def _setup_logging(log_level: str) -> None:
 async def _run() -> int:
     options = _load_options()
 
-    log_level = str(options.get("log_level", "info")).upper()
+    log_level = str(options.get("logging_settings", {}).get("log_level", "info")).upper()
     _setup_logging(log_level)
 
     overrides = build_overrides(

@@ -22,7 +22,7 @@ Die Optionen sind - seit HA-Supervisor-Unterstuetzung fuer verschachtelte
 Add-on-Optionen - in echte Abschnitte gruppiert, die als eigene
 Unterformulare in der Add-on-Konfigurations-UI erscheinen.
 
-### Allgemein / Verbindung (ungruppiert)
+### Abschnitt "Marstek Device"
 
 | Option | Standard | Beschreibung |
 |---|---|---|
@@ -117,7 +117,7 @@ reagieren.
 | `led_startup_state` | 0 | Panel-LED beim Start: 0 = aus, 1 = an |
 | `ble_block_startup_enable` | 0 | Bluetooth-Advertising beim Start: 0 = aktiv, 1 = deaktiviert |
 
-### `log_level` (ganz am Ende der Konfiguration)
+### Abschnitt "Logging"
 
 | Option | Standard | Bedeutung |
 |---|---|---|

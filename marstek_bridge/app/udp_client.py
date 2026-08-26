@@ -61,10 +61,10 @@ class ColorCategoryFormatter(logging.Formatter):
     """Faerbt Logzeilen je nach 'category' (extra={'category': ...}) ein."""
 
     _COLORS = {
-        _Category.STATUS: "\033[96m",   # cyan
-        _Category.CONTROL: "\033[93m",  # gelb
-        _Category.INIT: "\033[95m",     # magenta
-        _Category.COMM: "\033[91m",     # rot
+        _Category.STATUS: "\033[36m",   # cyan (Standard-SGR statt "bright"-Variante
+        _Category.CONTROL: "\033[33m",  # gelb  fuer bessere Kompatibilitaet mit
+        _Category.INIT: "\033[35m",     # magenta ANSI->HTML-Konvertern, z.B. im
+        _Category.COMM: "\033[31m",     # rot   HA-Add-on-Log-Viewer)
     }
     _RESET = "\033[0m"
 

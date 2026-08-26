@@ -43,13 +43,16 @@ def build_overrides(options: dict, *, mqtt_host_override: Optional[str] = None,
     Nutzer hat explizit einen eigenen mqtt_host in den Optionen gesetzt.
 
     Seit HA-Supervisor-Unterstuetzung fuer verschachtelte Add-on-Optionen
-    (HA >= 2025.10) liegen die meisten Werte in benannten Gruppen (siehe
-    config.yaml): scanrate_statuscalls, passiv_mode_settings,
+    (HA >= 2025.10) liegen die Werte in benannten Gruppen (siehe
+    config.yaml): marstek_device, scanrate_statuscalls, passiv_mode_settings,
     selfconsumption_control, message_settings, init_settings, dod_settings,
     additional_settings, mqtt_settings. mqtt_port liegt bewusst NICHT in
     der mqtt_settings-Gruppe (siehe config.yaml-Kommentar: ein Default
-    wuerde die Service-Discovery-Fallback-Logik unten verhindern)."""
+    wuerde die Service-Discovery-Fallback-Logik unten verhindern). log_level
+    bleibt ebenfalls top-level (wird direkt in main.py gelesen, nicht ueber
+    diese Funktion)."""
 
+    device = options.get("marstek_device", {}) or {}
     mqtt_group = options.get("mqtt_settings", {}) or {}
     mqtt_host = mqtt_group.get("mqtt_host") or mqtt_host_override or "core-mosquitto"
     mqtt_port = options.get("mqtt_port") or mqtt_port_override or 1883
@@ -66,17 +69,17 @@ def build_overrides(options: dict, *, mqtt_host_override: Optional[str] = None,
 
     return {
         "general": {
-            "device_ip": options["device_ip"],
-            "device_udp_port": int(options["device_udp_port"]),
-            "device_ble_mac": options.get("device_ble_mac", "") or "",
-            "device_type": options.get("device_type", "") or "",
+            "device_ip": device["device_ip"],
+            "device_udp_port": int(device["device_udp_port"]),
+            "device_ble_mac": device.get("device_ble_mac", "") or "",
+            "device_type": device.get("device_type", "") or "",
             "mqtt_host": mqtt_host,
             "mqtt_port": int(mqtt_port),
             "mqtt_username": mqtt_username,
             "mqtt_password": mqtt_password,
-            "mqtt_discovery_prefix": options.get("mqtt_discovery_prefix", "homeassistant"),
-            "mqtt_base_topic": options.get("mqtt_base_topic", "Marstek-Bridge-Control"),
-            "mqtt_suggested_area": options.get("mqtt_suggested_area", "Marstek"),
+            "mqtt_discovery_prefix": device.get("mqtt_discovery_prefix", "homeassistant"),
+            "mqtt_base_topic": device.get("mqtt_base_topic", "Marstek-Bridge-Control"),
+            "mqtt_suggested_area": device.get("mqtt_suggested_area", "Marstek"),
         },
         "status_polling": {
             "bat_status_interval_s": int(scan.get("bat_status_interval_s", 3600)),

@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.0.8
+
+- ANSI-Farbcodes von "hellen" SGR-Codes (90-97) auf **Standard-SGR-Codes
+  (30-37)** umgestellt, da manche ANSI->HTML-Konverter (u.a. offenbar
+  Teile des HA-Add-on-Log-Viewers) die erweiterten "bright"-Codes nicht
+  erkennen und dadurch weder Farbe noch lesbaren Text anzeigen.
+  **Hinweis:** Ob der Add-on-Log-Tab in deiner HA-Version ANSI-Codes
+  tatsaechlich in Farbe umwandelt oder als rohe Escape-Sequenzen anzeigt,
+  konnte ohne echten Supervisor nicht abschliessend verifiziert werden -
+  bitte nach dem Update pruefen. Falls weiterhin keine Farbe zu sehen ist,
+  sind die reinen Text-Tags `[STATUS]`/`[CONTROL]`/`[INIT]`/`[COMM]` in
+  jeder Log-Zeile bereits unabhaengig von ANSI-Unterstuetzung vorhanden.
+
+## 0.0.7
+
+- `log_level` in eine eigene, benannte Gruppe **"Logging"** verschoben -
+  gleiche aufklappbare Darstellung wie alle anderen Abschnitte, statt als
+  einzelnes, ungruppiertes Feld am Ende.
+- `main.py` entsprechend angepasst (liest `log_level` jetzt aus der
+  `logging_settings`-Gruppe).
+
+## 0.0.6
+
+- Letzte verbleibende ungruppierte Basis-Felder (`device_ip`,
+  `device_udp_port`, `device_ble_mac`, `device_type`,
+  `mqtt_discovery_prefix`, `mqtt_base_topic`, `mqtt_suggested_area`) in
+  eine echte, benannte Gruppe **"Marstek Device"** verschoben - gleiche
+  Darstellung wie alle anderen Abschnitte. Damit sind jetzt saemtliche
+  Optionen ausser `log_level` und `mqtt_port` gruppiert.
+- `addon_options.py` entsprechend angepasst (liest Geraete-/Verbindungswerte
+  jetzt aus der `marstek_device`-Gruppe).
+
 ## 0.0.5
 
 - `log_level` an das Ende der Konfiguration verschoben (war vorher unter

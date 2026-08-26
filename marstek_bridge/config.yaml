@@ -1,5 +1,5 @@
 name: "Marstek MQTT Bridge"
-version: "0.0.5"
+version: "0.0.8"
 slug: "marstek_bridge"
 description: >-
   Bruecke zwischen einem Marstek Energiespeicher (lokale UDP-API) und Home
@@ -20,13 +20,14 @@ services:
 map:
   - "addon_config:rw"
 options:
-  device_ip: "192.168.0.45"
-  device_udp_port: 30000
-  device_ble_mac: ""
-  device_type: ""
-  mqtt_discovery_prefix: "homeassistant"
-  mqtt_base_topic: "Marstek-Bridge-Control"
-  mqtt_suggested_area: "Marstek"
+  marstek_device:
+    device_ip: "192.168.0.45"
+    device_udp_port: 30000
+    device_ble_mac: ""
+    device_type: ""
+    mqtt_discovery_prefix: "homeassistant"
+    mqtt_base_topic: "Marstek-Bridge-Control"
+    mqtt_suggested_area: "Marstek"
 
   scanrate_statuscalls:
     bat_status_interval_s: 3600
@@ -69,15 +70,17 @@ options:
     mqtt_username: ""
     mqtt_password: ""
 
-  log_level: "info"
+  logging_settings:
+    log_level: "info"
 schema:
-  device_ip: "str"
-  device_udp_port: "port"
-  device_ble_mac: "str?"
-  device_type: "str?"
-  mqtt_discovery_prefix: "str"
-  mqtt_base_topic: "str"
-  mqtt_suggested_area: "str"
+  marstek_device:
+    device_ip: "str"
+    device_udp_port: "port"
+    device_ble_mac: "str?"
+    device_type: "str?"
+    mqtt_discovery_prefix: "str"
+    mqtt_base_topic: "str"
+    mqtt_suggested_area: "str"
 
   scanrate_statuscalls:
     bat_status_interval_s: "int(60,86400)"
@@ -125,4 +128,5 @@ schema:
   # via Mosquitto-Service-Discovery"-Logik in addon_options.py verhindern.
   mqtt_port: "port?"
 
-  log_level: "list(debug|info|warning|error)"
+  logging_settings:
+    log_level: "list(debug|info|warning|error)"

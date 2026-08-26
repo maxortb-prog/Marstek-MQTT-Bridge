@@ -1,28 +1,36 @@
 configuration:
-  device_ip:
-    name: "Device IP"
-    description: "IP address of the Marstek device on the local network."
-  device_udp_port:
-    name: "Device UDP port"
-    description: "UDP port configured in the Marstek app under Open API (default 30000)."
-  device_ble_mac:
-    name: "Bluetooth MAC (auto-detected)"
-    description: "Leave empty to auto-detect and remember on first start."
-  device_type:
-    name: "Device type (auto-detected)"
-    description: "Leave empty to auto-detect and remember on first start."
-  mqtt_discovery_prefix:
-    name: "MQTT discovery prefix"
-    description: "Usually leave at the default 'homeassistant'."
-  mqtt_base_topic:
-    name: "MQTT base topic"
-    description: "Topic prefix for all state/command topics of this add-on."
-  mqtt_suggested_area:
-    name: "Suggested area"
-    description: "Home Assistant area suggested for all devices created by this add-on."
-  log_level:
-    name: "Log level"
-    description: "Verbosity of the add-on's log output. 'debug' also colorizes control/status/init lines."
+  marstek_device:
+    name: "Marstek Device"
+    description: "Connection to the Marstek device and basic MQTT topic settings."
+    fields:
+      device_ip:
+        name: "Device IP"
+        description: "IP address of the Marstek device on the local network."
+      device_udp_port:
+        name: "Device UDP port"
+        description: "UDP port configured in the Marstek app under Open API (default 30000)."
+      device_ble_mac:
+        name: "Bluetooth MAC (auto-detected)"
+        description: "Leave empty to auto-detect and remember on first start."
+      device_type:
+        name: "Device type (auto-detected)"
+        description: "Leave empty to auto-detect and remember on first start."
+      mqtt_discovery_prefix:
+        name: "MQTT discovery prefix"
+        description: "Usually leave at the default 'homeassistant'."
+      mqtt_base_topic:
+        name: "MQTT base topic"
+        description: "Topic prefix for all state/command topics of this add-on."
+      mqtt_suggested_area:
+        name: "Suggested area"
+        description: "Home Assistant area suggested for all devices created by this add-on."
+  logging_settings:
+    name: "Logging"
+    description: "Verbosity of the add-on's log output."
+    fields:
+      log_level:
+        name: "Log level"
+        description: "'debug' also colorizes control/status/init lines (yellow=control, cyan=status, magenta=init, red=connection)."
   mqtt_port:
     name: "MQTT port (override)"
     description: "Only needed if not using the Mosquitto add-on with service discovery. Leave empty for auto-detection."
