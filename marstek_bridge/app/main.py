@@ -29,6 +29,7 @@ from pathlib import Path
 from addon_options import apply_persisted_discovery, build_overrides
 from bridge import MarstekBridge
 from config import MarstekConfig
+from udp_client import ColorCategoryFormatter
 
 OPTIONS_PATH = Path("/data/options.json")
 STATE_PATH = Path("/data/marstek_state.yaml")
@@ -41,14 +42,23 @@ def _load_options() -> dict:
         return json.load(f)
 
 
+def _setup_logging(log_level: str) -> None:
+    """Root-Logging mit Farbcodierung: gelb=Control, cyan=Status, magenta=Init,
+    rot=Verbindungsstatus (siehe udp_client.ColorCategoryFormatter). Andere
+    Logger ohne 'category'-Extra werden unveraendert (unfarbig) ausgegeben."""
+    handler = logging.StreamHandler()
+    handler.setFormatter(ColorCategoryFormatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s"))
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.addHandler(handler)
+    root.setLevel(getattr(logging, log_level.upper(), logging.INFO))
+
+
 async def _run() -> int:
     options = _load_options()
 
     log_level = str(options.get("log_level", "info")).upper()
-    logging.basicConfig(
-        level=getattr(logging, log_level, logging.INFO),
-        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
-    )
+    _setup_logging(log_level)
 
     overrides = build_overrides(
         options,

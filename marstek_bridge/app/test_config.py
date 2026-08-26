@@ -8,7 +8,7 @@ from config import MarstekConfig, ConfigError, DEFAULT_CONFIG
 def test_load_missing_file_uses_defaults(tmp_path):
     cfg = MarstekConfig.load(tmp_path / "does_not_exist.yaml")
     assert cfg.get("general", "device_udp_port") == 30000
-    assert cfg.get("passive_mode", "power") == 50
+    assert cfg.get("passive_mode", "power") == 800
 
 
 def test_load_partial_user_config_merges_with_defaults(tmp_path):
@@ -50,12 +50,16 @@ def test_validation_rejects_bad_values():
         MarstekConfig.from_dict({"dod": {"startup_value": 10}})
 
 
-def test_power_zero_only_warns_not_raises(caplog):
-    import logging
-    with caplog.at_level(logging.WARNING):
-        cfg = MarstekConfig.from_dict({"passive_mode": {"power": 0}})
+def test_power_zero_is_valid_and_means_no_discharge():
+    """passive_mode.power ist jetzt ein Entlade-Deckel: 0 ist eine gueltige,
+    bewusste Einstellung (Entladen im Passive-Mode vollstaendig sperren)."""
+    cfg = MarstekConfig.from_dict({"passive_mode": {"power": 0}})
     assert cfg.get("passive_mode", "power") == 0
-    assert any("ungünstig" in r.message for r in caplog.records)
+
+
+def test_negative_power_is_rejected():
+    with pytest.raises(ConfigError):
+        MarstekConfig.from_dict({"passive_mode": {"power": -10}})
 
 
 def test_default_config_is_not_mutated_by_from_dict():

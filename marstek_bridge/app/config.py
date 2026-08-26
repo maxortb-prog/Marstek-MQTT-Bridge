@@ -21,6 +21,7 @@ logger = logging.getLogger("marstek.config")
 
 
 DEFAULT_CONFIG: dict = {
+    # ── Allgemein / Verbindung ──────────────────────────────────────────
     "general": {
         "device_ip": "192.168.0.45",
         "device_udp_port": 30000,
@@ -34,34 +35,47 @@ DEFAULT_CONFIG: dict = {
         "mqtt_base_topic": "Marstek-Bridge-Control",
         "mqtt_suggested_area": "Marstek",
     },
+    # ── Abtastrate fuer Status-Abfragen ──────────────────────────────────
     "status_polling": {
         "bat_status_interval_s": 3600,   # 60 min
         "es_mode_interval_s": 900,       # 15 min
         "es_status_interval_s": 300,     # 5 min
     },
+    # ── Passive-Mode Einstellungen (Startwerte; zur Laufzeit ueber die
+    #    HA-Number-Entities passive_default_power/passive_cd_time aenderbar,
+    #    siehe bridge.py) ──────────────────────────────────────────────────
     "passive_mode": {
-        "power": 50,          # 0 vermeiden (siehe Doku: fuehrt zu max. Ladeleistung)
-        "cd_time": 60,
+        "power": 800,     # Start-Deckel fuer die max. Entlade-/Einspeiseleistung
+                          # (= max_output_w-Default: standardmaessig KEINE
+                          # zusaetzliche Einschraenkung ueber den Controller
+                          # hinaus; z.B. per HA-Automatisierung SOC-abhaengig
+                          # absenken, damit der Akku nicht zu schnell leerlaeuft)
+        "cd_time": 60,     # Nachlaufzeit/Countdown, mit jedem Passive-Kommando mitgesendet
         "max_cd_time": 3600,
     },
+    # ── Regelungsparameter (Passive-Mode Controller) ─────────────────────
     "controller": {
         "deadzone_w": 40,
         "min_setpoint_change_w": 50,
         "max_step_w": 125,
-        "min_output_w": -1500,
-        "max_output_w": 800,
+        "min_output_w": -1500,   # harte Ladegrenze (negativ = Laden aus dem Netz)
+        "max_output_w": 800,     # harte Einspeisegrenze - Marstek koennte mehr,
+                                 # das ist aktuell eine bewusste Zusatzbegrenzung
         "min_send_interval_s": 30,
     },
+    # ── Message Settings (laufender Poll-/Control-Betrieb) ───────────────
     "message_settings": {
         "max_retry": 3,
         "timeout_s": 1.0,
     },
+    # ── Initphase Settings ────────────────────────────────────────────────
     "init": {
         "base_timeout_s": 2.0,
-        "timeout_increment_s": 5.0,
+        "timeout_increment_s": 10.0,
         "max_retries": 4,
-        "inter_command_delay_s": 5.0,  # Pause zwischen einzelnen Init-Kommandos
+        "inter_command_delay_s": 10.0,  # Pause zwischen einzelnen Init-Kommandos
     },
+    # ── DOD Setting (Depth of Discharge) ─────────────────────────────────
     "dod": {
         "startup_value": 88,
     },
@@ -152,10 +166,11 @@ class MarstekConfig:
             raise ConfigError("passive_mode.cd_time muss zwischen 1 und max_cd_time liegen")
         if int(pm["max_cd_time"]) > 3600:
             raise ConfigError("passive_mode.max_cd_time darf 3600 nicht ueberschreiten (Geraetevorgabe)")
-        if int(pm["power"]) == 0:
-            logger.warning(
-                "passive_mode.power=0 ist ungünstig (Geraet geht dann auf max. Ladeleistung) - "
-                "bitte einen Wert ungleich 0 konfigurieren"
+        if float(pm["power"]) < 0:
+            raise ConfigError(
+                "passive_mode.power darf nicht negativ sein - es ist ein Deckel fuer die maximale "
+                "Entlade-/Einspeiseleistung, keine vorzeichenbehaftete Sollwertvorgabe (0 ist gueltig "
+                "und bedeutet: Entladen im Passive-Mode vollstaendig sperren)"
             )
 
         dod = self._data["dod"]["startup_value"]

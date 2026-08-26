@@ -15,7 +15,9 @@ Queue/Prioritaeten) ruft update() auf und verschickt das zurueckgegebene
 dict (falls nicht None) an den Marstek.
 
 Filterkette (in dieser Reihenfolge):
-    1. Sicherheits-Clamp auf [min_output_w, max_output_w]
+    1. Sicherheits-Clamp auf [min_output_w, effektive_max_output_w]
+       (effektive_max_output_w = min(max_output_w, dynamischer Entlade-Deckel,
+       siehe set_discharge_cap() - typischerweise SOC-abhaengig aus HA gesetzt)
     2. Totzone         -> Rauschen um den aktuellen (internen) Sollwert ignorieren
     3. Slew-Rate       -> Sollwert naehert sich dem Ziel nur in kleinen Schritten
     4. Mindeständerung -> erst senden, wenn genug Differenz zum zuletzt
@@ -27,6 +29,14 @@ Filterkette (in dieser Reihenfolge):
 
 Alle Schwellwerte sind ueber PassiveControllerConfig konfigurierbar und
 sollen im HA-Addon unter "Optionen -> Controller" einstellbar sein.
+
+Der dynamische Entlade-Deckel (set_discharge_cap) und die cd_time
+(set_cd_time) sind bewusst NICHT Teil der Config, sondern zur Laufzeit
+aenderbar: sie sollen z.B. per HA-Number-Entity live verstellbar sein (etwa
+SOC-abhaengig, damit der Akku bei niedrigem Ladezustand nicht mit voller
+Leistung weiter entladen wird), ohne dass ein Config-Reload/Neustart noetig
+waere. config.max_output_w bleibt dabei immer die harte, aeussere
+Sicherheitsgrenze - der Deckel kann sie nur verschaerfen, nie aufheben.
 """
 
 from __future__ import annotations
@@ -89,6 +99,35 @@ class PassiveController:
         config.validate()
         self.config = config
         self.state = state or PassiveControllerState()
+        # Zusaetzlicher, zur Laufzeit aenderbarer Deckel fuer die maximale
+        # Entlade-/Einspeiseleistung (z.B. SOC-abhaengig aus HA gesteuert).
+        # None = kein Zusatz-Deckel, es gilt nur config.max_output_w.
+        # Kann die konfigurierte Obergrenze nur VERSCHAERFEN, nie aufheben.
+        self._discharge_cap_w: Optional[float] = None
+        # Zur Laufzeit aenderbare cd_time (z.B. aus einer HA-Number-Entity).
+        # None = es gilt config.default_cd_time_s.
+        self._cd_time_override_s: Optional[int] = None
+
+    def set_discharge_cap(self, cap_w: Optional[float]) -> None:
+        """Setzt/aendert den dynamischen Entlade-Deckel. Wird typischerweise
+        von einer HA-Automatisierung aufgerufen (z.B. SOC-abhaengig), damit
+        der Akku bei niedrigem SOC nicht mit voller Leistung weiter entladen
+        wird. None setzt den Deckel zurueck (nur noch max_output_w gilt)."""
+        self._discharge_cap_w = cap_w
+
+    def set_cd_time(self, cd_time_s: Optional[int]) -> None:
+        """Setzt/aendert die cd_time, die mit jedem Passive-Kommando
+        mitgesendet wird. None setzt auf config.default_cd_time_s zurueck."""
+        self._cd_time_override_s = cd_time_s
+
+    def _effective_max_output_w(self) -> float:
+        if self._discharge_cap_w is None:
+            return self.config.max_output_w
+        return min(self.config.max_output_w, self._discharge_cap_w)
+
+    def _effective_cd_time_s(self) -> int:
+        raw = self._cd_time_override_s if self._cd_time_override_s is not None else self.config.default_cd_time_s
+        return min(int(raw), self.config.max_cd_time_s)
 
     def update(self, raw_target_w: float, *, now: Optional[float] = None) -> Optional[PassiveCommand]:
         """
@@ -108,9 +147,10 @@ class PassiveController:
         cfg = self.config
         st = self.state
         st.update_count += 1
+        effective_max = self._effective_max_output_w()
 
-        # 1) Sicherheits-Clamp
-        clamped = max(cfg.min_output_w, min(cfg.max_output_w, raw_target_w))
+        # 1) Sicherheits-Clamp (inkl. dynamischem Entlade-Deckel)
+        clamped = max(cfg.min_output_w, min(effective_max, raw_target_w))
         hit_safety_limit = clamped != raw_target_w
 
         # Erstinitialisierung
@@ -130,7 +170,7 @@ class PassiveController:
         # 3) Slew-Rate-Begrenzung
         step = max(-cfg.max_step_w, min(cfg.max_step_w, deviation))
         new_committed = st.committed_setpoint_w + step
-        new_committed = max(cfg.min_output_w, min(cfg.max_output_w, new_committed))
+        new_committed = max(cfg.min_output_w, min(effective_max, new_committed))
         st.committed_setpoint_w = new_committed
 
         # 4) Mindeständerung ggue. dem zuletzt tatsaechlich GESENDETEN Wert
@@ -182,7 +222,7 @@ class PassiveController:
         st.last_send_monotonic = now
         st.send_count += 1
 
-        cd_time = min(cfg.default_cd_time_s, cfg.max_cd_time_s)
+        cd_time = self._effective_cd_time_s()
 
         logger.info(
             "SEND [%s] power=%dW cd_time=%ds (Update #%d, Sendung #%d)",

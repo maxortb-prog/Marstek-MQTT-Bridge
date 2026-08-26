@@ -59,7 +59,7 @@ class StartupResult:
 
 
 async def run_startup_sequence(client: MarstekUDPClient, cfg: MarstekConfig) -> StartupResult:
-    delay = cfg.get("init", "inter_command_delay_s", default=5.0)
+    delay = cfg.get("init", "inter_command_delay_s", default=10.0)
 
     async def _pause():
         if delay:

@@ -12,6 +12,7 @@ Discovery-/State-Topics mitliest und Command-Topics beschreibt.
 import asyncio
 import json
 import logging
+import time
 
 import aiomqtt
 import pytest
@@ -170,6 +171,41 @@ async def test_communication_fail_published_when_device_stops_responding(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_control_command_not_delayed_by_long_poll_interval(tmp_path):
+    """Verifiziert, dass der Poll-Loop-Umbau (erst schlafen, dann pollen)
+    Control-Kommandos NICHT verzoegert: auch bei einem absichtlich sehr
+    langen Poll-Intervall muss ein Control-Kommando sofort verarbeitet
+    werden, weil es unabhaengig ueber die Control-Queue laeuft."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    # ALLE Poll-Intervalle absichtlich riesig -> die Poll-Loops schlafen
+    # praktisch "fuer immer" nach dem Start
+    cfg = _test_config(tmp_path, port, status_polling={
+        "bat_status_interval_s": 999999, "es_mode_interval_s": 999999, "es_status_interval_s": 999999
+    })
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        t_start = time.monotonic()
+        await bridge.start()
+
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="ha-sim-fastcontrol") as ha:
+            await ha.publish("Marstek-Bridge-Control/energy_mode/set", "Passive", qos=1)
+
+        await asyncio.sleep(0.3)
+        elapsed = time.monotonic() - t_start
+
+        set_mode_calls = [r for r in server.received if r["method"] == "ES.SetMode"]
+        assert set_mode_calls, "ES.SetMode wurde nicht gesendet - Control-Kommando wurde blockiert!"
+        assert elapsed < 2.0, f"Control-Kommando kam viel zu spaet an ({elapsed:.2f}s)"
+    finally:
+        await bridge.stop()
+        server.stop()
+
+
+@pytest.mark.asyncio
 async def test_ha_select_passive_mode_sends_es_setmode(tmp_path):
     server = FakeMarstekServer()
     port = await server.start()
@@ -220,6 +256,77 @@ async def test_shelly_power_drives_passive_controller_and_sends_command(tmp_path
         assert passive_calls, "Passive-Regler hat kein ES.SetMode gesendet"
         last_power = passive_calls[-1]["params"]["config"]["passive_cfg"]["power"]
         assert last_power == -300
+    finally:
+        await bridge.stop()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_ha_can_dynamically_lower_passive_power_cap_via_soc_automation(tmp_path):
+    """Kernanforderung: eine HA-Automatisierung (z.B. SOC-abhaengig) soll
+    passive_default_power live absenken koennen, und das muss den
+    automatischen (Shelly-getriebenen) Regler SOFORT beeinflussen - nicht
+    erst nach einem Neustart oder nur kosmetisch."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    cfg = _test_config(tmp_path, port, shelly={"power_topic": "shellies/em/power"})
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+
+        # SOC ist niedrig -> Automatisierung senkt den Deckel auf 150W
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="ha-sim-soc-automation") as ha:
+            await ha.publish("Marstek-Bridge-Control/passive_default_power/set", "150", qos=1)
+        await asyncio.sleep(0.2)
+        assert bridge._passive_power_cap == 150.0
+        assert bridge.passive_ctrl._discharge_cap_w == 150.0
+
+        # Haushalt braucht 500W aus dem Netz -> ohne Deckel wuerde die
+        # Regelung mit -500W (aus Marstek-Sicht: einspeisen/entladen) senden,
+        # der Deckel muss das auf 150W begrenzen.
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="shelly-sim-soc") as shelly:
+            await shelly.publish("shellies/em/power", "-500", qos=0)
+        await asyncio.sleep(0.4)
+
+        passive_calls = [r for r in server.received
+                          if r["method"] == "ES.SetMode" and r["params"]["config"]["mode"] == "Passive"]
+        assert passive_calls, "Passive-Regler hat kein ES.SetMode gesendet"
+        assert passive_calls[-1]["params"]["config"]["passive_cfg"]["power"] == 150, (
+            "Der SOC-Deckel (150W) haette die Ausgabe begrenzen muessen"
+        )
+    finally:
+        await bridge.stop()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_manual_passive_select_uses_live_power_not_static_config(tmp_path):
+    """Regressionstest fuer den urspruenglichen Bug: manuelles Umschalten auf
+    'Passive' im Dropdown muss den zuletzt in HA gesetzten Wert verwenden,
+    nicht den unveraenderlichen Startwert aus der Config."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    cfg = _test_config(tmp_path, port)
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="ha-sim-manual") as ha:
+            await ha.publish("Marstek-Bridge-Control/passive_default_power/set", "222", qos=1)
+            await asyncio.sleep(0.2)
+            await ha.publish("Marstek-Bridge-Control/energy_mode/set", "Passive", qos=1)
+
+        await asyncio.sleep(0.4)
+        passive_calls = [r for r in server.received
+                          if r["method"] == "ES.SetMode" and r["params"]["config"]["mode"] == "Passive"]
+        assert passive_calls
+        assert passive_calls[-1]["params"]["config"]["passive_cfg"]["power"] == 222
     finally:
         await bridge.stop()
         server.stop()

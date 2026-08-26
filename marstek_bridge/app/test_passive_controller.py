@@ -95,6 +95,69 @@ def test_config_validation():
         PassiveControllerConfig(min_output_w=100, max_output_w=50).validate()
 
 
+def test_discharge_cap_restricts_output_below_max_output_w():
+    cfg = PassiveControllerConfig(deadzone_w=5, min_setpoint_change_w=5, max_step_w=2000,
+                                   min_output_w=-1500, max_output_w=800, min_send_interval_s=0)
+    ctrl = PassiveController(cfg)
+    ctrl.set_discharge_cap(200)  # enger als max_output_w=800
+
+    cmd = ctrl.update(700, now=0.0)  # Anfrage 700W, aber Deckel bei 200W
+    assert cmd is not None
+    assert cmd["power"] == 200, "Deckel muss die Ausgabe auf 200W begrenzen, obwohl max_output_w=800 erlauben wuerde"
+
+
+def test_discharge_cap_cannot_exceed_configured_max_output_w():
+    """Der Deckel darf die konfigurierte Obergrenze nur verschaerfen, nie lockern."""
+    cfg = PassiveControllerConfig(deadzone_w=5, min_setpoint_change_w=5, max_step_w=2000,
+                                   min_output_w=-1500, max_output_w=800, min_send_interval_s=0)
+    ctrl = PassiveController(cfg)
+    ctrl.set_discharge_cap(5000)  # Deckel hoeher als max_output_w -> darf nichts bewirken
+
+    cmd = ctrl.update(2000, now=0.0)
+    assert cmd["power"] == 800, "max_output_w muss weiterhin die harte Obergrenze bleiben"
+
+
+def test_discharge_cap_does_not_affect_charging_direction():
+    cfg = PassiveControllerConfig(deadzone_w=5, min_setpoint_change_w=5, max_step_w=2000,
+                                   min_output_w=-1500, max_output_w=800, min_send_interval_s=0)
+    ctrl = PassiveController(cfg)
+    ctrl.set_discharge_cap(100)  # soll nur die Entlade-/Einspeiserichtung betreffen
+
+    cmd = ctrl.update(-1200, now=0.0)  # Laden, deutlich unterhalb des Entlade-Deckels
+    assert cmd["power"] == -1200, "Lade-Richtung darf vom Entlade-Deckel nicht betroffen sein"
+
+
+def test_discharge_cap_reset_to_none_restores_max_output_w():
+    cfg = PassiveControllerConfig(deadzone_w=5, min_setpoint_change_w=5, max_step_w=2000,
+                                   min_output_w=-1500, max_output_w=800, min_send_interval_s=0)
+    ctrl = PassiveController(cfg)
+    ctrl.set_discharge_cap(100)
+    ctrl.set_discharge_cap(None)  # z.B. SOC wieder hoch -> Deckel aufheben
+
+    cmd = ctrl.update(700, now=0.0)
+    assert cmd["power"] == 700
+
+
+def test_cd_time_override_used_instead_of_config_default():
+    cfg = PassiveControllerConfig(deadzone_w=5, min_setpoint_change_w=5, max_step_w=2000,
+                                   min_send_interval_s=0, default_cd_time_s=60, max_cd_time_s=3600)
+    ctrl = PassiveController(cfg)
+    ctrl.set_cd_time(120)
+
+    cmd = ctrl.update(300, now=0.0)
+    assert cmd["cd_time"] == 120
+
+
+def test_cd_time_override_still_capped_by_max_cd_time_s():
+    cfg = PassiveControllerConfig(deadzone_w=5, min_setpoint_change_w=5, max_step_w=2000,
+                                   min_send_interval_s=0, default_cd_time_s=60, max_cd_time_s=300)
+    ctrl = PassiveController(cfg)
+    ctrl.set_cd_time(9999)  # unsinnig hoch, muss trotzdem gekappt werden
+
+    cmd = ctrl.update(300, now=0.0)
+    assert cmd["cd_time"] == 300
+
+
 if __name__ == "__main__":
     # Demo-Modus ohne pytest: einfach direkt ausfuehren und Log/Ausgabe anschauen
     test_deadzone_ignores_noise()

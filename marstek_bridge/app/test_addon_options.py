@@ -20,7 +20,7 @@ def test_build_overrides_fills_all_expected_sections_with_defaults():
     assert overrides["general"]["device_ip"] == "192.168.0.45"
     assert overrides["general"]["device_udp_port"] == 30000
     assert overrides["general"]["mqtt_host"] == "core-mosquitto"
-    assert overrides["passive_mode"]["power"] == 50
+    assert overrides["passive_mode"]["power"] == 800
     assert overrides["controller"]["min_send_interval_s"] == 30
     assert overrides["message_settings"]["max_retry"] == 3
     assert overrides["init"]["max_retries"] == 4
@@ -94,7 +94,7 @@ def test_full_options_set_maps_correctly_and_validates():
         controller_deadzone_w=30, controller_min_setpoint_change_w=40,
         controller_max_step_w=100, controller_min_output_w=-1200, controller_max_output_w=600,
         controller_min_send_interval_s=20,
-        message_max_retry=5, message_timeout_s=1.5,
+        message_settings_max_retry=5, message_settings_timeout_s=1.5,
         init_base_timeout_s=1.0, init_timeout_increment_s=3.0, init_max_retries=6,
         init_inter_command_delay_s=2.0,
         dod_startup_value=50, led_startup_state=1, ble_block_startup_enable=1,

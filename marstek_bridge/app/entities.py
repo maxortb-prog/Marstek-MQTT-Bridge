@@ -176,9 +176,9 @@ def build_entities(cfg: MarstekConfig, ble_mac: str, device_type: str) -> Entity
     # Nur die vom Nutzer explizit gewuenschten Modi (Manual bewusst ausgeklammert)
     add(HAEntity("select", "energy_mode", "Energy Mode", es_control_dev,
                  options=["Auto", "AI", "Passive", "Ups"]))
-    add(HAEntity("number", "passive_default_power", "Passive Default Power", es_control_dev,
-                 unit_of_measurement="W",
-                 min_value=cfg.get("controller", "min_output_w", default=-1500),
+    add(HAEntity("number", "passive_default_power", "Passive Max Discharge Power", es_control_dev,
+                 unit_of_measurement="W", icon="mdi:battery-arrow-up",
+                 min_value=0,
                  max_value=cfg.get("controller", "max_output_w", default=800), step=10))
     add(HAEntity("number", "passive_cd_time", "Passive Countdown Time", es_control_dev,
                  unit_of_measurement="s", min_value=1,

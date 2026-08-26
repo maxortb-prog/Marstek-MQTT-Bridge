@@ -53,7 +53,7 @@ def test_passive_number_ranges_come_from_config():
                                     "passive_mode": {"max_cd_time": 1800}})
     bundle = build_entities(cfg, ble_mac="aabbcc", device_type="VenusC")
     power_entity = bundle.entities["passive_default_power"]
-    assert power_entity.min_value == -1200
+    assert power_entity.min_value == 0
     assert power_entity.max_value == 600
     cd_entity = bundle.entities["passive_cd_time"]
     assert cd_entity.max_value == 1800

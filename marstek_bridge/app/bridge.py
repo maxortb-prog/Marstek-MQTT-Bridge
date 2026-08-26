@@ -118,6 +118,14 @@ class MarstekBridge:
             default_cd_time_s=pm_cfg["cd_time"],
             max_cd_time_s=pm_cfg["max_cd_time"],
         ))
+        # Zur Laufzeit ueber HA aenderbare Werte (z.B. SOC-abhaengige
+        # Automatisierung fuer den Entlade-Deckel). Startwerte kommen aus der
+        # Config, werden danach aber NICHT mehr aus self.cfg nachgelesen -
+        # einzige Quelle der Wahrheit ist ab jetzt dieser In-Memory-Zustand.
+        self._passive_power_cap = float(pm_cfg["power"])
+        self._passive_cd_time = int(pm_cfg["cd_time"])
+        self.passive_ctrl.set_discharge_cap(self._passive_power_cap)
+        self.passive_ctrl.set_cd_time(self._passive_cd_time)
 
         await self.mqtt.publish_state(self.bundle.entities["udp_connection"], self.udp.comm_established)
         await self.mqtt.publish_state(self.bundle.entities["communication_fail"], self.udp.comm_fail)
@@ -217,7 +225,16 @@ class MarstekBridge:
     # ------------------------------------------------------------------ #
 
     async def _poll_loop(self, method: str, handler, interval_s: float) -> None:
+        # Erst die volle Abtastzeit abwarten, dann erst pollen: die Werte
+        # wurden ja gerade erst waehrend der Init-Sequenz frisch abgefragt,
+        # ein sofortiger erneuter Poll direkt nach dem Start waere unnoetig.
         while not self._closing:
+            try:
+                await asyncio.sleep(interval_s)
+            except asyncio.CancelledError:
+                raise
+            if self._closing:
+                break
             try:
                 result = await self.udp.send_status(method, {"id": 0})
                 await handler(result)
@@ -229,10 +246,6 @@ class MarstekBridge:
                 raise
             except Exception:
                 logger.exception("Unerwarteter Fehler beim Poll von %s", method)
-            try:
-                await asyncio.sleep(interval_s)
-            except asyncio.CancelledError:
-                raise
 
     async def _on_battery_status(self, result: dict) -> None:
         await self._publish_mapped(result, self.bundle.field_map_battery)
@@ -257,10 +270,10 @@ class MarstekBridge:
                 await self._handle_led_ctrl(payload)
             elif entity.object_id == "energy_mode":
                 await self._handle_energy_mode(payload)
-            elif entity.object_id in ("passive_default_power", "passive_cd_time"):
-                # Wirkt erst beim naechsten manuellen Wechsel in den Passive-Mode;
-                # hier nur den neuen Wert an HA zurueckspiegeln.
-                await self.mqtt.publish_state(entity, payload)
+            elif entity.object_id == "passive_default_power":
+                await self._handle_passive_power_cap(payload)
+            elif entity.object_id == "passive_cd_time":
+                await self._handle_passive_cd_time(payload)
             else:
                 logger.warning("Kein Handler fuer Kommando auf '%s' registriert", entity.object_id)
         except MarstekCommunicationError:
@@ -268,6 +281,25 @@ class MarstekBridge:
                          entity.object_id)
         except MarstekDeviceError as exc:
             logger.error("Kommando fuer '%s' vom Geraet abgelehnt: %s", entity.object_id, exc)
+
+    async def _handle_passive_power_cap(self, payload: str) -> None:
+        """Aendert den dynamischen Entlade-Deckel live, z.B. per SOC-abhaengiger
+        HA-Automatisierung. Wirkt SOFORT auf den automatischen Regler
+        (naechster Shelly-getriebener update()-Aufruf) UND auf den naechsten
+        manuellen Wechsel in den Passive-Mode ueber energy_mode."""
+        value = float(payload)
+        if value < 0:
+            logger.warning("Negativer Wert fuer passive_default_power (%s) ignoriert", payload)
+            return
+        self._passive_power_cap = value
+        self.passive_ctrl.set_discharge_cap(value)
+        await self.mqtt.publish_state(self.bundle.entities["passive_default_power"], value)
+
+    async def _handle_passive_cd_time(self, payload: str) -> None:
+        value = int(float(payload))
+        self._passive_cd_time = value
+        self.passive_ctrl.set_cd_time(value)
+        await self.mqtt.publish_state(self.bundle.entities["passive_cd_time"], value)
 
     async def _handle_dod(self, payload: str) -> None:
         value = int(float(payload))
@@ -296,9 +328,12 @@ class MarstekBridge:
         elif mode == "Ups":
             config = {"mode": "Ups", "ups_cfg": {"enable": 1}}
         elif mode == "Passive":
-            power = int(self.cfg.get("passive_mode", "power", default=50))
-            cd_time = int(self.cfg.get("passive_mode", "cd_time", default=60))
-            config = {"mode": "Passive", "passive_cfg": {"power": power, "cd_time": cd_time}}
+            # Live-Werte verwenden (ueber HA per passive_default_power/
+            # passive_cd_time aenderbar), NICHT die statische Config -
+            # sonst haette eine Aenderung in HA keine Wirkung (ehemaliger Bug).
+            power = self._passive_power_cap
+            cd_time = self._passive_cd_time
+            config = {"mode": "Passive", "passive_cfg": {"power": int(power), "cd_time": int(cd_time)}}
             self._start_countdown(cd_time)
         else:
             logger.warning("Unbekannter Energy-Mode '%s' ignoriert (Manual wird bewusst nicht unterstuetzt)", mode)
