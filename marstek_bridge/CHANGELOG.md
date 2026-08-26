@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.0.4
+
+- **Strukturelle Änderung**: Add-on-Optionen von flachen, prefix-benannten
+  Schlüsseln (`message_settings_max_retry`, `controller_deadzone_w`, ...)
+  auf echte verschachtelte Gruppen umgestellt (`message_settings.max_retry`,
+  `selfconsumption_control.deadzone_w`, ...). Seit HA Supervisor 2025.10
+  werden diese Gruppen als eigene Unterformulare mit Titel in der
+  Add-on-Konfigurations-UI angezeigt: "Scanrate for Statuscalls", "Passiv
+  Mode Settings", "Selfconsumption Control Parameters for Passive Mode",
+  "Message Settings", "Init Settings", "DOD (Depth of Discharge)",
+  "Additional Settings".
+- `addon_options.py` entsprechend umgebaut (liest jetzt verschachtelte
+  Gruppen statt flacher Praefix-Schluessel), inkl. Fallback auf Defaults
+  falls eine ganze Gruppe im `options.json` fehlt.
+- `translations/en.yaml` um Gruppennamen/-beschreibungen sowie
+  Feldbeschreibungen fuer alle Optionen ergaenzt.
+- Voraussetzung ergaenzt: HA Supervisor >= 2025.10 fuer korrekte Anzeige
+  der gruppierten Abschnitte.
+
+## 0.0.3
+
+- Gliedernde Überschriften in `config.yaml` ergänzt (sowohl im `options:`-
+  als auch im `schema:`-Block), damit die Struktur beim Lesen der Datei
+  leichter erkennbar ist: "Scanrate for Statuscalls", "Passiv Mode
+  Settings", "Selfconsumption Control Parameters for Passive Mode",
+  "Message Settings", "Init Settings", "DOD (Depth of Discharge)",
+  "Additional Settings". Rein kosmetisch (YAML-Kommentare) - keine
+  funktionale Änderung, HA zeigt diese Überschriften nicht in der
+  Add-on-Konfigurations-UI an, nur beim Lesen der Rohdatei.
+
 ## 0.0.2
 
 - Erklaerende Kommentare zu `passive_power` in `config.yaml` ergaenzt

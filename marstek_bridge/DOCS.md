@@ -12,14 +12,17 @@ Bruecke zwischen einem Marstek Energiespeicher (lokale UDP-API, siehe
   Add-on. Wird es verwendet, erkennt dieses Add-on die Zugangsdaten
   automatisch (Service-Discovery) - es muss dann nichts unter
   `mqtt_host`/`mqtt_port`/... eingetragen werden.
+- **Home Assistant Supervisor 2025.10 oder neuer**, damit die gruppierten
+  Konfigurationsabschnitte (siehe unten) korrekt in der Add-on-UI angezeigt
+  werden.
 
 ## Konfiguration
 
-Die Optionen sind in folgende Gruppen gegliedert (technisch bleibt es ein
-flaches HA-Add-on-Options-Feld, die Reihenfolge/Kommentare in `config.yaml`
-folgen aber dieser Gliederung):
+Die Optionen sind - seit HA-Supervisor-Unterstuetzung fuer verschachtelte
+Add-on-Optionen - in echte Abschnitte gruppiert, die als eigene
+Unterformulare in der Add-on-Konfigurations-UI erscheinen.
 
-### Allgemein / Verbindung
+### Allgemein / Verbindung (ungruppiert)
 
 | Option | Standard | Beschreibung |
 |---|---|---|
@@ -31,8 +34,9 @@ folgen aber dieser Gliederung):
 | `mqtt_base_topic` | `Marstek-Bridge-Control` | Topic-Praefix fuer alle State-/Command-Topics dieses Add-ons |
 | `mqtt_suggested_area` | `Marstek` | Vorgeschlagener HA-Bereich fuer alle erzeugten Geraete |
 | `log_level` | `info` | `debug` faerbt zusaetzlich SEND/RECV/TIMEOUT-Zeilen ein (siehe [Logging](#logging)) |
+| `mqtt_host`/`mqtt_port`/`mqtt_username`/`mqtt_password` | (leer) | Nur ausfuellen, wenn **kein** Mosquitto-Add-on mit Service-Discovery verwendet wird |
 
-### Abtastrate fuer Status-Abfragen
+### Abschnitt "Scanrate for Statuscalls"
 
 Der jeweils erste Poll-Zyklus jeder Status-Abfrage startet erst nach Ablauf
 des vollen Intervalls nach der Initialisierung - die Werte wurden ja
@@ -44,19 +48,20 @@ waehrend der Init-Sequenz gerade erst frisch abgefragt.
 | `es_mode_interval_s` | 900 (15 min) | `ES.GetMode` |
 | `es_status_interval_s` | 300 (5 min) | `ES.GetStatus` |
 
-### Passive-Mode Einstellungen
+### Abschnitt "Passiv Mode Settings"
 
 | Option | Standard | Bedeutung |
 |---|---|---|
-| `passive_power` | 800 | **Deckel** fuer die maximale Entlade-/Einspeiseleistung des automatischen Reglers (siehe unten) und Sollwert beim manuellen Umschalten auf "Passive" im HA-Dropdown. Zur Laufzeit ueber die HA-Entity `number.passive_default_power` aenderbar (z.B. SOC-abhaengig per Automatisierung absenken, damit der Akku nicht zu schnell entladen wird). 0 ist gueltig und sperrt das Entladen im Passive-Mode vollstaendig. |
-| `passive_cd_time` | 60 | Nachlaufzeit/Countdown (Sekunden), die mit jedem Passive-Kommando mitgesendet wird. Ebenfalls live ueber `number.passive_cd_time` aenderbar. |
-| `passive_max_cd_time` | 3600 | Obergrenze fuer `passive_cd_time` (Geraetevorgabe: max. 3600s = 60 min) |
+| `power` | 800 | **Deckel** fuer die maximale Entlade-/Einspeiseleistung des automatischen Reglers und Sollwert beim manuellen Umschalten auf "Passive" im HA-Dropdown. Zur Laufzeit ueber die HA-Entity `number.passive_default_power` aenderbar (z.B. SOC-abhaengig per Automatisierung absenken, damit der Akku nicht zu schnell entladen wird). 0 ist gueltig und sperrt das Entladen im Passive-Mode vollstaendig. |
+| `cd_time` | 60 | Nachlaufzeit/Countdown (Sekunden), die mit jedem Passive-Kommando mitgesendet wird. Ebenfalls live ueber `number.passive_cd_time` aenderbar. |
+| `max_cd_time` | 3600 | Obergrenze fuer `cd_time` (Geraetevorgabe: max. 3600s = 60 min) |
 
-**Wichtig:** `passive_power` begrenzt nur die **Entlade-/Einspeiserichtung**
+**Wichtig:** `power` begrenzt nur die **Entlade-/Einspeiserichtung**
 (positive Werte). Die Laderichtung (negative Werte, Laden aus dem Netz)
-wird ausschliesslich durch `controller_min_output_w` begrenzt.
+wird ausschliesslich durch `min_output_w` (Abschnitt "Selfconsumption
+Control Parameters for Passive Mode") begrenzt.
 
-### Regelungsparameter (Passive-Mode Controller)
+### Abschnitt "Selfconsumption Control Parameters for Passive Mode"
 
 Traeger Filter (Totzone, Slew-Rate, Mindeständerung, Hold-off), der aus
 einer externen Leistungsmessung (`shelly_power_topic`) einen ruhigen
@@ -65,48 +70,42 @@ reagieren.
 
 | Option | Standard | Bedeutung |
 |---|---|---|
-| `controller_deadzone_w` | 40 | Rauschunterdrueckung, W |
-| `controller_min_setpoint_change_w` | 50 | Mindeständerung vor erneutem Senden, W |
-| `controller_max_step_w` | 125 | Max. Leistungsschritt pro Zyklus, W |
-| `controller_min_output_w` | -1500 | Harte Ladegrenze (negativ = Laden). Vom Regler NICHT durch `passive_power` beeinflussbar. |
-| `controller_max_output_w` | 800 | Harte Einspeisegrenze - der Marstek koennte physisch mehr, das ist eine bewusste Zusatzbegrenzung. `passive_power` kann diese Grenze nur verschaerfen (verkleinern), nie ueberschreiten. |
-| `controller_min_send_interval_s` | 30 | Mindestabstand zwischen zwei Sendungen, 0-60s (0 = kein Mindestabstand) |
+| `deadzone_w` | 40 | Rauschunterdrueckung, W |
+| `min_setpoint_change_w` | 50 | Mindeständerung vor erneutem Senden, W |
+| `max_step_w` | 125 | Max. Leistungsschritt pro Zyklus, W |
+| `min_output_w` | -1500 | Harte Ladegrenze (negativ = Laden). Vom `power`-Deckel NICHT beeinflussbar. |
+| `max_output_w` | 800 | Harte Einspeisegrenze - der Marstek koennte physisch mehr, das ist eine bewusste Zusatzbegrenzung. Der `power`-Deckel (siehe "Passiv Mode Settings") kann diese Grenze nur verschaerfen, nie ueberschreiten. |
+| `min_send_interval_s` | 30 | Mindestabstand zwischen zwei Sendungen, 0-60s (0 = kein Mindestabstand) |
 | `shelly_power_topic` | (leer) | MQTT-Topic einer externen Leistungsmessung (z.B. Shelly EM), treibt den automatischen Regler an. Leer = Regler deaktiviert, nur manuelle Passive-Steuerung ueber HA moeglich |
 
-### Message Settings (laufender Poll-/Control-Betrieb)
+### Abschnitt "Message Settings"
 
 | Option | Standard | Bedeutung |
 |---|---|---|
-| `message_settings_max_retry` | 3 | Max. Wiederholungen im laufenden Betrieb (0-10), danach `communication_fail` |
-| `message_settings_timeout_s` | 1.0 | Timeout pro Versuch im laufenden Betrieb |
+| `max_retry` | 3 | Max. Wiederholungen im laufenden Betrieb (0-10), danach `communication_fail` |
+| `timeout_s` | 1.0 | Timeout pro Versuch im laufenden Betrieb |
 
-### Initphase Settings
-
-| Option | Standard | Bedeutung |
-|---|---|---|
-| `init_base_timeout_s` | 2.0 | Timeout des ersten Versuchs waehrend der Erstinitialisierung |
-| `init_timeout_increment_s` | 10.0 | Steigerung des Timeouts pro weiterem Versuch |
-| `init_max_retries` | 4 | Max. Wiederholungen waehrend der Init-Sequenz, danach `communication_fail` |
-| `init_inter_command_delay_s` | 10.0 | Pause zwischen den einzelnen Init-Kommandos (`Marstek.GetDevice`, `Wifi.GetStatus`, ..., `Led.Ctrl`), damit das Geraet beim Start nicht mit neun Anfragen praktisch gleichzeitig belastet wird |
-
-### DOD Setting (Depth of Discharge)
+### Abschnitt "Init Settings"
 
 | Option | Standard | Bedeutung |
 |---|---|---|
-| `dod_startup_value` | 88 | DOD-Wert (30-88), der bei jedem Add-on-Start gesetzt wird |
+| `base_timeout_s` | 2.0 | Timeout des ersten Versuchs waehrend der Erstinitialisierung |
+| `timeout_increment_s` | 10.0 | Steigerung des Timeouts pro weiterem Versuch |
+| `max_retries` | 4 | Max. Wiederholungen waehrend der Init-Sequenz, danach `communication_fail` |
+| `inter_command_delay_s` | 10.0 | Pause zwischen den einzelnen Init-Kommandos (`Marstek.GetDevice`, `Wifi.GetStatus`, ..., `Led.Ctrl`), damit das Geraet beim Start nicht mit neun Anfragen praktisch gleichzeitig belastet wird |
 
-### Sonstige Startwerte
+### Abschnitt "DOD (Depth of Discharge)"
+
+| Option | Standard | Bedeutung |
+|---|---|---|
+| `startup_value` | 88 | DOD-Wert (30-88), der bei jedem Add-on-Start gesetzt wird |
+
+### Abschnitt "Additional Settings"
 
 | Option | Standard | Bedeutung |
 |---|---|---|
 | `led_startup_state` | 0 | Panel-LED beim Start: 0 = aus, 1 = an |
 | `ble_block_startup_enable` | 0 | Bluetooth-Advertising beim Start: 0 = aktiv, 1 = deaktiviert |
-
-### MQTT-Override (nur ohne Mosquitto-Add-on/Service-Discovery)
-
-| Option | Beschreibung |
-|---|---|
-| `mqtt_host`, `mqtt_port`, `mqtt_username`, `mqtt_password` | Nur ausfuellen, wenn **kein** Mosquitto-Add-on mit Service-Discovery verwendet wird |
 
 ## Logging
 
@@ -139,10 +138,10 @@ Wichtige Status-Entities fuer Automatisierungen:
 
 Wichtige Control-Entities fuer den Passive-Mode:
 
-- `number.passive_default_power` - der Entlade-Deckel (siehe oben). Fuer
-  eine SOC-abhaengige Automatisierung z.B. an `sensor.battery_soc` koppeln:
-  hoher SOC -> Deckel hoch (bis max. `controller_max_output_w`), niedriger
-  SOC -> Deckel absenken.
+- `number.passive_default_power` - der Entlade-Deckel (siehe "Passiv Mode
+  Settings" oben). Fuer eine SOC-abhaengige Automatisierung z.B. an
+  `sensor.battery_soc` koppeln: hoher SOC -> Deckel hoch (bis max.
+  `max_output_w`), niedriger SOC -> Deckel absenken.
 - `number.passive_cd_time` - die Nachlaufzeit/Countdown fuer Passive-Kommandos.
 - `select.energy_mode` - Auto/AI/Passive/Ups (Manual wird bewusst nicht
   unterstuetzt).
@@ -162,3 +161,6 @@ aktiviert werden.
 - `cd_time` (Passive-Mode-Countdown) wird vom Geraet nicht zurückgemeldet
   und daher lokal im Add-on mitgezaehlt - nach einem Neustart des Add-ons
   beginnt die Anzeige neu.
+- Die gruppierten Konfigurationsabschnitte setzen HA Supervisor >= 2025.10
+  voraus. Auf aelteren Installationen ist das Rendering der Abschnitte
+  nicht getestet.

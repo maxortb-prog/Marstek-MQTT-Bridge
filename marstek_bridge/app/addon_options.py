@@ -40,12 +40,26 @@ def build_overrides(options: dict, *, mqtt_host_override: Optional[str] = None,
     Die mqtt_*_override-Parameter kommen typischerweise aus der
     Supervisor-Service-Discovery (bashio::services mqtt ...) und haben
     Vorrang vor manuell in den Optionen eingetragenen Werten, AUSSER der
-    Nutzer hat explizit einen eigenen mqtt_host in den Optionen gesetzt."""
+    Nutzer hat explizit einen eigenen mqtt_host in den Optionen gesetzt.
+
+    Seit HA-Supervisor-Unterstuetzung fuer verschachtelte Add-on-Optionen
+    (HA >= 2025.10) liegen die meisten Werte in benannten Gruppen (siehe
+    config.yaml): scanrate_statuscalls, passiv_mode_settings,
+    selfconsumption_control, message_settings, init_settings, dod_settings,
+    additional_settings. Nur die Verbindungs-/MQTT-Basiswerte bleiben flach."""
 
     mqtt_host = options.get("mqtt_host") or mqtt_host_override or "core-mosquitto"
     mqtt_port = options.get("mqtt_port") or mqtt_port_override or 1883
     mqtt_username = options.get("mqtt_username") or mqtt_username_override or ""
     mqtt_password = options.get("mqtt_password") or mqtt_password_override or ""
+
+    scan = options.get("scanrate_statuscalls", {}) or {}
+    passive = options.get("passiv_mode_settings", {}) or {}
+    ctrl = options.get("selfconsumption_control", {}) or {}
+    msg = options.get("message_settings", {}) or {}
+    init = options.get("init_settings", {}) or {}
+    dod = options.get("dod_settings", {}) or {}
+    extra = options.get("additional_settings", {}) or {}
 
     return {
         "general": {
@@ -62,37 +76,37 @@ def build_overrides(options: dict, *, mqtt_host_override: Optional[str] = None,
             "mqtt_suggested_area": options.get("mqtt_suggested_area", "Marstek"),
         },
         "status_polling": {
-            "bat_status_interval_s": int(options.get("bat_status_interval_s", 3600)),
-            "es_mode_interval_s": int(options.get("es_mode_interval_s", 900)),
-            "es_status_interval_s": int(options.get("es_status_interval_s", 300)),
+            "bat_status_interval_s": int(scan.get("bat_status_interval_s", 3600)),
+            "es_mode_interval_s": int(scan.get("es_mode_interval_s", 900)),
+            "es_status_interval_s": int(scan.get("es_status_interval_s", 300)),
         },
         "passive_mode": {
-            "power": float(options.get("passive_power", 800)),
-            "cd_time": int(options.get("passive_cd_time", 60)),
-            "max_cd_time": int(options.get("passive_max_cd_time", 3600)),
+            "power": float(passive.get("power", 800)),
+            "cd_time": int(passive.get("cd_time", 60)),
+            "max_cd_time": int(passive.get("max_cd_time", 3600)),
         },
         "controller": {
-            "deadzone_w": float(options.get("controller_deadzone_w", 40)),
-            "min_setpoint_change_w": float(options.get("controller_min_setpoint_change_w", 50)),
-            "max_step_w": float(options.get("controller_max_step_w", 125)),
-            "min_output_w": float(options.get("controller_min_output_w", -1500)),
-            "max_output_w": float(options.get("controller_max_output_w", 800)),
-            "min_send_interval_s": float(options.get("controller_min_send_interval_s", 30)),
+            "deadzone_w": float(ctrl.get("deadzone_w", 40)),
+            "min_setpoint_change_w": float(ctrl.get("min_setpoint_change_w", 50)),
+            "max_step_w": float(ctrl.get("max_step_w", 125)),
+            "min_output_w": float(ctrl.get("min_output_w", -1500)),
+            "max_output_w": float(ctrl.get("max_output_w", 800)),
+            "min_send_interval_s": float(ctrl.get("min_send_interval_s", 30)),
         },
         "message_settings": {
-            "max_retry": int(options.get("message_settings_max_retry", 3)),
-            "timeout_s": float(options.get("message_settings_timeout_s", 1.0)),
+            "max_retry": int(msg.get("max_retry", 3)),
+            "timeout_s": float(msg.get("timeout_s", 1.0)),
         },
         "init": {
-            "base_timeout_s": float(options.get("init_base_timeout_s", 2.0)),
-            "timeout_increment_s": float(options.get("init_timeout_increment_s", 10.0)),
-            "max_retries": int(options.get("init_max_retries", 4)),
-            "inter_command_delay_s": float(options.get("init_inter_command_delay_s", 10.0)),
+            "base_timeout_s": float(init.get("base_timeout_s", 2.0)),
+            "timeout_increment_s": float(init.get("timeout_increment_s", 10.0)),
+            "max_retries": int(init.get("max_retries", 4)),
+            "inter_command_delay_s": float(init.get("inter_command_delay_s", 10.0)),
         },
-        "dod": {"startup_value": int(options.get("dod_startup_value", 88))},
-        "led": {"startup_state": int(options.get("led_startup_state", 0))},
-        "ble_block": {"startup_enable": int(options.get("ble_block_startup_enable", 0))},
-        "shelly": {"power_topic": options.get("shelly_power_topic", "") or ""},
+        "dod": {"startup_value": int(dod.get("startup_value", 88))},
+        "led": {"startup_state": int(extra.get("led_startup_state", 0))},
+        "ble_block": {"startup_enable": int(extra.get("ble_block_startup_enable", 0))},
+        "shelly": {"power_topic": ctrl.get("shelly_power_topic", "") or ""},
     }
 
 

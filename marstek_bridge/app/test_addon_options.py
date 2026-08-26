@@ -10,6 +10,9 @@ from config import MarstekConfig
 
 
 def _minimal_options(**overrides):
+    """Baut ein minimales, verschachteltes options.json-Aequivalent.
+    'overrides' erlaubt es, einzelne Gruppen oder Top-Level-Felder gezielt
+    zu ueberschreiben, z.B. _minimal_options(message_settings={"max_retry": 5})."""
     base = {"device_ip": "192.168.0.45", "device_udp_port": 30000}
     base.update(overrides)
     return base
@@ -32,6 +35,14 @@ def test_build_overrides_produces_a_config_that_passes_validation():
     overrides = build_overrides(_minimal_options())
     cfg = MarstekConfig.from_dict(overrides)  # wirft bei Validierungsfehlern
     assert cfg.get("general", "device_ip") == "192.168.0.45"
+
+
+def test_missing_groups_fall_back_to_defaults():
+    """Fehlen ganze Gruppen im options.json (z.B. bei einem alten/minimalen
+    Setup), duerfen build_overrides nicht mit KeyError abstuerzen."""
+    overrides = build_overrides({"device_ip": "10.0.0.1", "device_udp_port": 30000})
+    assert overrides["status_polling"]["bat_status_interval_s"] == 3600
+    assert overrides["init"]["timeout_increment_s"] == 10.0
 
 
 def test_mqtt_service_discovery_override_used_when_no_manual_host_set():
@@ -84,21 +95,27 @@ def test_apply_persisted_discovery_missing_file_is_noop(tmp_path):
     assert result["general"]["device_ble_mac"] == ""
 
 
-def test_full_options_set_maps_correctly_and_validates():
+def test_full_nested_options_set_maps_correctly_and_validates():
     options = _minimal_options(
         device_ble_mac="", device_type="",
         mqtt_discovery_prefix="homeassistant", mqtt_base_topic="Marstek-Bridge-Control",
         mqtt_suggested_area="Keller",
-        bat_status_interval_s=1800, es_mode_interval_s=600, es_status_interval_s=120,
-        passive_power=100, passive_cd_time=120, passive_max_cd_time=1800,
-        controller_deadzone_w=30, controller_min_setpoint_change_w=40,
-        controller_max_step_w=100, controller_min_output_w=-1200, controller_max_output_w=600,
-        controller_min_send_interval_s=20,
-        message_settings_max_retry=5, message_settings_timeout_s=1.5,
-        init_base_timeout_s=1.0, init_timeout_increment_s=3.0, init_max_retries=6,
-        init_inter_command_delay_s=2.0,
-        dod_startup_value=50, led_startup_state=1, ble_block_startup_enable=1,
-        shelly_power_topic="shellies/em/power",
+        scanrate_statuscalls={
+            "bat_status_interval_s": 1800, "es_mode_interval_s": 600, "es_status_interval_s": 120,
+        },
+        passiv_mode_settings={"power": 100, "cd_time": 120, "max_cd_time": 1800},
+        selfconsumption_control={
+            "deadzone_w": 30, "min_setpoint_change_w": 40, "max_step_w": 100,
+            "min_output_w": -1200, "max_output_w": 600, "min_send_interval_s": 20,
+            "shelly_power_topic": "shellies/em/power",
+        },
+        message_settings={"max_retry": 5, "timeout_s": 1.5},
+        init_settings={
+            "base_timeout_s": 1.0, "timeout_increment_s": 3.0, "max_retries": 6,
+            "inter_command_delay_s": 2.0,
+        },
+        dod_settings={"startup_value": 50},
+        additional_settings={"led_startup_state": 1, "ble_block_startup_enable": 1},
     )
     overrides = build_overrides(options)
     cfg = MarstekConfig.from_dict(overrides)
@@ -106,3 +123,9 @@ def test_full_options_set_maps_correctly_and_validates():
     assert cfg.get("status_polling", "es_status_interval_s") == 120
     assert cfg.get("controller", "min_send_interval_s") == 20
     assert cfg.get("shelly", "power_topic") == "shellies/em/power"
+    assert cfg.get("passive_mode", "power") == 100
+    assert cfg.get("message_settings", "max_retry") == 5
+    assert cfg.get("init", "max_retries") == 6
+    assert cfg.get("dod", "startup_value") == 50
+    assert cfg.get("led", "startup_state") == 1
+    assert cfg.get("ble_block", "startup_enable") == 1

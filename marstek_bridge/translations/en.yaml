@@ -11,6 +11,18 @@ configuration:
   device_type:
     name: "Device type (auto-detected)"
     description: "Leave empty to auto-detect and remember on first start."
+  mqtt_discovery_prefix:
+    name: "MQTT discovery prefix"
+    description: "Usually leave at the default 'homeassistant'."
+  mqtt_base_topic:
+    name: "MQTT base topic"
+    description: "Topic prefix for all state/command topics of this add-on."
+  mqtt_suggested_area:
+    name: "Suggested area"
+    description: "Home Assistant area suggested for all devices created by this add-on."
+  log_level:
+    name: "Log level"
+    description: "Verbosity of the add-on's log output. 'debug' also colorizes control/status/init lines."
   mqtt_host:
     name: "MQTT host (override)"
     description: "Only needed if not using the Mosquitto add-on with service discovery."
@@ -23,9 +35,104 @@ configuration:
   mqtt_password:
     name: "MQTT password (override)"
     description: "Only needed if not using the Mosquitto add-on with service discovery."
-  shelly_power_topic:
-    name: "External power measurement topic"
-    description: "MQTT topic of an external power measurement (e.g. Shelly EM) used to drive the passive-mode controller. Leave empty to disable automatic passive-mode regulation."
-  log_level:
-    name: "Log level"
-    description: "Verbosity of the add-on's log output."
+
+  scanrate_statuscalls:
+    name: "Scanrate for Statuscalls"
+    description: "Poll intervals for the periodic status queries (Bat.GetStatus, ES.GetMode, ES.GetStatus). The first poll of each starts only after the full interval has elapsed since startup."
+    fields:
+      bat_status_interval_s:
+        name: "Battery status interval"
+        description: "Seconds between Bat.GetStatus polls."
+      es_mode_interval_s:
+        name: "Energy mode interval"
+        description: "Seconds between ES.GetMode polls."
+      es_status_interval_s:
+        name: "Energy status interval"
+        description: "Seconds between ES.GetStatus polls."
+
+  passiv_mode_settings:
+    name: "Passiv Mode Settings"
+    description: "Startup values for the Marstek Passive mode."
+    fields:
+      power:
+        name: "Max discharge/feed-in power"
+        description: "Caps the maximum discharge/feed-in power the controller may send, even if it computed more. Charging is not affected - see 'Charging limit' under Selfconsumption Control. 0 is valid and fully disables discharging in Passive mode. Adjustable live via number.passive_default_power, e.g. by a SOC-based automation."
+      cd_time:
+        name: "Countdown time"
+        description: "Countdown (seconds) sent with every Passive command. Adjustable live via number.passive_cd_time."
+      max_cd_time:
+        name: "Max countdown time"
+        description: "Upper bound for the countdown time (device limit: 3600s)."
+
+  selfconsumption_control:
+    name: "Selfconsumption Control Parameters for Passive Mode"
+    description: "Sluggish filter (dead zone, slew rate, minimum change, hold-off) that turns an external power reading into a calm Passive-mode setpoint, instead of reacting to every spike."
+    fields:
+      deadzone_w:
+        name: "Dead zone"
+        description: "Noise suppression around the current setpoint, in Watt."
+      min_setpoint_change_w:
+        name: "Minimum setpoint change"
+        description: "Minimum change vs. the last sent value before sending again."
+      max_step_w:
+        name: "Maximum step"
+        description: "Maximum change per control cycle (slew rate), in Watt."
+      min_output_w:
+        name: "Charging limit"
+        description: "Hard lower bound (negative = charging from the grid). Not affected by the Passive-mode power cap."
+      max_output_w:
+        name: "Feed-in limit"
+        description: "Hard upper bound for feed-in/discharge. The Passive-mode power cap can only tighten this, never exceed it."
+      min_send_interval_s:
+        name: "Minimum send interval"
+        description: "Minimum time between two sent commands, 0-60s (0 = no minimum, send immediately when needed)."
+      shelly_power_topic:
+        name: "External power measurement topic"
+        description: "MQTT topic of an external power measurement (e.g. Shelly EM) driving the automatic controller. Leave empty to disable automatic regulation (manual Passive control via Home Assistant still works)."
+
+  message_settings:
+    name: "Message Settings"
+    description: "Retry behaviour for status/control commands during normal operation (after successful initialization)."
+    fields:
+      max_retry:
+        name: "Max retries"
+        description: "Maximum retries before the command is considered failed (Communication Fail), 0-10."
+      timeout_s:
+        name: "Timeout"
+        description: "Timeout per attempt, in seconds."
+
+  init_settings:
+    name: "Init Settings"
+    description: "Retry/backoff behaviour during the initial startup sequence (device discovery, first status reads, startup commands)."
+    fields:
+      base_timeout_s:
+        name: "Base timeout"
+        description: "Timeout of the first attempt during initialization."
+      timeout_increment_s:
+        name: "Timeout increment"
+        description: "Added to the timeout on each further attempt."
+      max_retries:
+        name: "Max retries"
+        description: "Maximum retries during the init sequence."
+      inter_command_delay_s:
+        name: "Delay between init commands"
+        description: "Pause between the individual startup commands (Marstek.GetDevice, Wifi.GetStatus, ..., Led.Ctrl), so the device isn't hit with many requests at once."
+
+  dod_settings:
+    name: "DOD (Depth of Discharge)"
+    description: "Depth-of-discharge value applied on every add-on start."
+    fields:
+      startup_value:
+        name: "DOD startup value"
+        description: "Value (30-88) set on the device at every add-on start."
+
+  additional_settings:
+    name: "Additional Settings"
+    description: "Miscellaneous startup values."
+    fields:
+      led_startup_state:
+        name: "LED startup state"
+        description: "Panel LED at startup: 0 = off, 1 = on."
+      ble_block_startup_enable:
+        name: "Bluetooth advertising startup state"
+        description: "Bluetooth advertising at startup: 0 = active, 1 = disabled."
