@@ -61,12 +61,19 @@ def test_mqtt_service_discovery_override_used_when_no_manual_host_set():
 
 def test_manual_mqtt_host_in_options_wins_over_discovery():
     overrides = build_overrides(
-        _minimal_options(mqtt_host="external.broker.example", mqtt_port=8883),
+        _minimal_options(mqtt_settings={"mqtt_host": "external.broker.example"}),
         mqtt_host_override="core-mosquitto.local",
         mqtt_port_override=1884,
     )
     assert overrides["general"]["mqtt_host"] == "external.broker.example"
-    assert overrides["general"]["mqtt_port"] == 8883
+    # mqtt_port liegt bewusst NICHT in der mqtt_settings-Gruppe (siehe Kommentar
+    # in addon_options.py), sondern bleibt top-level
+    overrides2 = build_overrides(
+        _minimal_options(mqtt_port=8883),
+        mqtt_host_override="core-mosquitto.local",
+        mqtt_port_override=1884,
+    )
+    assert overrides2["general"]["mqtt_port"] == 8883
 
 
 def test_apply_persisted_discovery_fills_empty_fields_only(tmp_path):
@@ -93,6 +100,16 @@ def test_apply_persisted_discovery_missing_file_is_noop(tmp_path):
     overrides = build_overrides(_minimal_options())
     result = apply_persisted_discovery(overrides, tmp_path / "does_not_exist.yaml")
     assert result["general"]["device_ble_mac"] == ""
+
+
+def test_mqtt_settings_group_maps_host_username_password():
+    overrides = build_overrides(_minimal_options(
+        mqtt_settings={"mqtt_host": "external.broker.example",
+                       "mqtt_username": "user1", "mqtt_password": "pw1"},
+    ))
+    assert overrides["general"]["mqtt_host"] == "external.broker.example"
+    assert overrides["general"]["mqtt_username"] == "user1"
+    assert overrides["general"]["mqtt_password"] == "pw1"
 
 
 def test_full_nested_options_set_maps_correctly_and_validates():

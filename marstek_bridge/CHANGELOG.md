@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.0.5
+
+- `log_level` an das Ende der Konfiguration verschoben (war vorher unter
+  "Allgemein" ganz oben).
+- MQTT-Override-Felder (`mqtt_host`, `mqtt_username`, `mqtt_password`) aus
+  dem generischen "Nicht verwendete optionale Konfigurationsoptionen"-
+  Bereich in eine echte, benannte Gruppe **"MQTT Settings"** verschoben
+  (gleiche Darstellung wie die anderen Abschnitte).
+  `mqtt_port` bleibt bewusst ausserhalb dieser Gruppe ohne Default-Wert,
+  da ein vorbelegter Port die "leer lassen = automatische Erkennung via
+  Mosquitto-Service-Discovery"-Logik verhindern wuerde. Dadurch kann sich
+  `mqtt_port` in der UI ggf. weiterhin anders verhalten als die drei
+  anderen Felder der Gruppe - ohne echten Supervisor nicht verifizierbar.
+- `addon_options.py` entsprechend angepasst (liest `mqtt_host`/
+  `mqtt_username`/`mqtt_password` jetzt aus der `mqtt_settings`-Gruppe,
+  `mqtt_port` weiterhin top-level).
+
 ## 0.0.4
 
 - **Strukturelle Änderung**: Add-on-Optionen von flachen, prefix-benannten

@@ -46,12 +46,15 @@ def build_overrides(options: dict, *, mqtt_host_override: Optional[str] = None,
     (HA >= 2025.10) liegen die meisten Werte in benannten Gruppen (siehe
     config.yaml): scanrate_statuscalls, passiv_mode_settings,
     selfconsumption_control, message_settings, init_settings, dod_settings,
-    additional_settings. Nur die Verbindungs-/MQTT-Basiswerte bleiben flach."""
+    additional_settings, mqtt_settings. mqtt_port liegt bewusst NICHT in
+    der mqtt_settings-Gruppe (siehe config.yaml-Kommentar: ein Default
+    wuerde die Service-Discovery-Fallback-Logik unten verhindern)."""
 
-    mqtt_host = options.get("mqtt_host") or mqtt_host_override or "core-mosquitto"
+    mqtt_group = options.get("mqtt_settings", {}) or {}
+    mqtt_host = mqtt_group.get("mqtt_host") or mqtt_host_override or "core-mosquitto"
     mqtt_port = options.get("mqtt_port") or mqtt_port_override or 1883
-    mqtt_username = options.get("mqtt_username") or mqtt_username_override or ""
-    mqtt_password = options.get("mqtt_password") or mqtt_password_override or ""
+    mqtt_username = mqtt_group.get("mqtt_username") or mqtt_username_override or ""
+    mqtt_password = mqtt_group.get("mqtt_password") or mqtt_password_override or ""
 
     scan = options.get("scanrate_statuscalls", {}) or {}
     passive = options.get("passiv_mode_settings", {}) or {}

@@ -23,18 +23,9 @@ configuration:
   log_level:
     name: "Log level"
     description: "Verbosity of the add-on's log output. 'debug' also colorizes control/status/init lines."
-  mqtt_host:
-    name: "MQTT host (override)"
-    description: "Only needed if not using the Mosquitto add-on with service discovery."
   mqtt_port:
     name: "MQTT port (override)"
-    description: "Only needed if not using the Mosquitto add-on with service discovery."
-  mqtt_username:
-    name: "MQTT username (override)"
-    description: "Only needed if not using the Mosquitto add-on with service discovery."
-  mqtt_password:
-    name: "MQTT password (override)"
-    description: "Only needed if not using the Mosquitto add-on with service discovery."
+    description: "Only needed if not using the Mosquitto add-on with service discovery. Leave empty for auto-detection."
 
   scanrate_statuscalls:
     name: "Scanrate for Statuscalls"
@@ -136,3 +127,17 @@ configuration:
       ble_block_startup_enable:
         name: "Bluetooth advertising startup state"
         description: "Bluetooth advertising at startup: 0 = active, 1 = disabled."
+
+  mqtt_settings:
+    name: "MQTT Settings"
+    description: "Override the MQTT broker connection. Only needed if not using the Mosquitto add-on with service discovery - leave empty otherwise."
+    fields:
+      mqtt_host:
+        name: "MQTT host"
+        description: "Only needed if not using the Mosquitto add-on with service discovery."
+      mqtt_username:
+        name: "MQTT username"
+        description: "Only needed if not using the Mosquitto add-on with service discovery."
+      mqtt_password:
+        name: "MQTT password"
+        description: "Only needed if not using the Mosquitto add-on with service discovery."

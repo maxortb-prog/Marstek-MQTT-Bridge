@@ -1,5 +1,5 @@
 name: "Marstek MQTT Bridge"
-version: "0.0.4"
+version: "0.0.5"
 slug: "marstek_bridge"
 description: >-
   Bruecke zwischen einem Marstek Energiespeicher (lokale UDP-API) und Home
@@ -27,7 +27,6 @@ options:
   mqtt_discovery_prefix: "homeassistant"
   mqtt_base_topic: "Marstek-Bridge-Control"
   mqtt_suggested_area: "Marstek"
-  log_level: "info"
 
   scanrate_statuscalls:
     bat_status_interval_s: 3600
@@ -64,6 +63,13 @@ options:
   additional_settings:
     led_startup_state: 0
     ble_block_startup_enable: 0
+
+  mqtt_settings:
+    mqtt_host: ""
+    mqtt_username: ""
+    mqtt_password: ""
+
+  log_level: "info"
 schema:
   device_ip: "str"
   device_udp_port: "port"
@@ -72,7 +78,6 @@ schema:
   mqtt_discovery_prefix: "str"
   mqtt_base_topic: "str"
   mqtt_suggested_area: "str"
-  log_level: "list(debug|info|warning|error)"
 
   scanrate_statuscalls:
     bat_status_interval_s: "int(60,86400)"
@@ -110,7 +115,14 @@ schema:
     led_startup_state: "list(0|1)"
     ble_block_startup_enable: "list(0|1)"
 
-  mqtt_host: "str?"
+  mqtt_settings:
+    mqtt_host: "str?"
+    mqtt_username: "str?"
+    mqtt_password: "password?"
+
+  # mqtt_port bleibt bewusst OHNE Default (schema-only optional): ein
+  # gueltiger Port-Default wuerde die "leer lassen = automatische Erkennung
+  # via Mosquitto-Service-Discovery"-Logik in addon_options.py verhindern.
   mqtt_port: "port?"
-  mqtt_username: "str?"
-  mqtt_password: "password?"
+
+  log_level: "list(debug|info|warning|error)"

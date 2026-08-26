@@ -33,8 +33,18 @@ Unterformulare in der Add-on-Konfigurations-UI erscheinen.
 | `mqtt_discovery_prefix` | `homeassistant` | I.d.R. nicht aendern |
 | `mqtt_base_topic` | `Marstek-Bridge-Control` | Topic-Praefix fuer alle State-/Command-Topics dieses Add-ons |
 | `mqtt_suggested_area` | `Marstek` | Vorgeschlagener HA-Bereich fuer alle erzeugten Geraete |
-| `log_level` | `info` | `debug` faerbt zusaetzlich SEND/RECV/TIMEOUT-Zeilen ein (siehe [Logging](#logging)) |
-| `mqtt_host`/`mqtt_port`/`mqtt_username`/`mqtt_password` | (leer) | Nur ausfuellen, wenn **kein** Mosquitto-Add-on mit Service-Discovery verwendet wird |
+
+### Abschnitt "MQTT Settings"
+
+Nur ausfuellen, wenn **kein** Mosquitto-Add-on mit Service-Discovery
+verwendet wird.
+
+| Option | Bedeutung |
+|---|---|
+| `mqtt_host` | Broker-Host |
+| `mqtt_username` | Broker-Benutzername |
+| `mqtt_password` | Broker-Passwort |
+| `mqtt_port` (liegt bewusst ausserhalb dieser Gruppe) | Broker-Port. Leer lassen fuer automatische Erkennung - ein vorbelegter Default wuerde die Service-Discovery verhindern. |
 
 ### Abschnitt "Scanrate for Statuscalls"
 
@@ -106,6 +116,12 @@ reagieren.
 |---|---|---|
 | `led_startup_state` | 0 | Panel-LED beim Start: 0 = aus, 1 = an |
 | `ble_block_startup_enable` | 0 | Bluetooth-Advertising beim Start: 0 = aktiv, 1 = deaktiviert |
+
+### `log_level` (ganz am Ende der Konfiguration)
+
+| Option | Standard | Bedeutung |
+|---|---|---|
+| `log_level` | `info` | `debug` faerbt zusaetzlich SEND/RECV/TIMEOUT-Zeilen ein (siehe [Logging](#logging)) |
 
 ## Logging
 
