@@ -92,7 +92,7 @@ class HAEntity:
 
     @property
     def has_command_topic(self) -> bool:
-        return self.component in ("switch", "select", "number")
+        return self.component in ("switch", "select", "number", "button")
 
 
 CommandCallback = Callable[[HAEntity, str], Union[None, Awaitable[None]]]
@@ -223,10 +223,14 @@ class HAMqttBridge:
         payload: dict = {
             "name": entity.name,
             "unique_id": entity.unique_id,
-            "state_topic": entity.state_topic,
             "device": entity.device.to_dict(),
             "availability_topic": self.availability_topic,
         }
+        # 'button' ist in HA eine zustandslose Aktions-Entity - kein
+        # state_topic im Discovery-Schema vorgesehen (im Gegensatz zu allen
+        # anderen Komponenten hier).
+        if entity.component != "button":
+            payload["state_topic"] = entity.state_topic
         if entity.device_class:
             payload["device_class"] = entity.device_class
         if entity.unit_of_measurement:
@@ -239,6 +243,8 @@ class HAMqttBridge:
             payload["entity_category"] = entity.entity_category
         if entity.command_topic:
             payload["command_topic"] = entity.command_topic
+        if entity.component == "button":
+            payload["payload_press"] = "PRESS"
         if entity.component in ("switch",):
             payload["payload_on"] = entity.payload_on
             payload["payload_off"] = entity.payload_off

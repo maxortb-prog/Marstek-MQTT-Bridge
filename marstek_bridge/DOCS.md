@@ -154,6 +154,17 @@ alle 1-5s) hier sehr viele Zeilen anfallen können - das würde bei
 `log_level=debug` sonst das restliche Log fluten. Diese Option lässt sich
 unabhängig aktivieren, auch wenn `log_level` auf `info` steht.
 
+**Automatische Aktivierung beim Wechsel in den Passive-Mode:** Unabhängig
+von dieser Konfigurationsoption schaltet die Bridge den ControlLogic-Logger
+automatisch auf DEBUG, sobald `select.energy_mode` manuell auf "Passive"
+gestellt wird - inklusive einer sofortigen Diagnosemeldung, ob überhaupt
+ein `shelly_power_topic` konfiguriert ist. Damit lässt sich auf einen
+Blick prüfen, ob der Shelly-Eingang überhaupt ankommt, ohne vorher die
+Konfiguration ändern und das Add-on neu starten zu müssen. Beim
+Verlassen des Passive-Mode (Wechsel zu Auto/AI/Ups) kehrt der Logger zum
+konfigurierten Grundzustand zurück (an, falls `debug_control_logic`
+aktiviert ist, sonst aus).
+
 ## Entities in Home Assistant
 
 Nach dem ersten erfolgreichen Start erscheinen automatisch mehrere Geraete:
@@ -181,6 +192,14 @@ Wichtige Control-Entities fuer den Passive-Mode:
 - `number.shelly_debounce_time_s` - Mittelungsfenster fuer die Entprellung des externen Leistungssignals.
 - `select.energy_mode` - Auto/AI/Passive/Ups (Manual wird bewusst nicht
   unterstuetzt).
+- `button.passive_resend` - **"Resend Passive Command"**: sendet das
+  aktuelle Passive-Kommando (Deckel/cd_time) erneut, ohne den Modus zu
+  wechseln. Home-Assistant-`select`-Entities loesen beim erneuten Klicken
+  auf den bereits aktiven Wert oft KEINE neue MQTT-Nachricht aus (das
+  Frontend erkennt keine Zustandsaenderung) - dieser Button umgeht das
+  zuverlaessig, da Button-Entities bei jedem Druck garantiert senden.
+  Setzt dabei auch den Countdown ("Passive Countdown Remaining") zurueck
+  und aktiviert automatisch das ControlLogic-Debugging (siehe oben).
 
 ## Watchdog / automatischer Neustart
 

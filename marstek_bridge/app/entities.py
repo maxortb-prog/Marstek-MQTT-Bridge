@@ -190,6 +190,8 @@ def build_entities(cfg: MarstekConfig, ble_mac: str, device_type: str) -> Entity
                  state_class="measurement"))
     add(HAEntity("number", "shelly_debounce_time_s", "Shelly Input Debounce Time", es_control_dev,
                  unit_of_measurement="s", icon="mdi:sine-wave", min_value=0, max_value=300, step=1))
+    add(HAEntity("button", "passive_resend", "Resend Passive Command", es_control_dev,
+                 icon="mdi:refresh", entity_category="config"))
 
     return EntityBundle(
         hub_device=hub,

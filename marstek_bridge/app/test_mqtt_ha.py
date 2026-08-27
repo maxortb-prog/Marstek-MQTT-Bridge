@@ -142,3 +142,50 @@ async def test_select_entity_options_and_state_publish():
         assert state_msgs[0][1] == "Passive"
     finally:
         await bridge.close()
+
+
+@pytest.mark.asyncio
+async def test_button_entity_no_state_topic_and_press_routes_to_callback():
+    """Button-Entities brauchen kein state_topic im Discovery-Payload (nicht
+    Teil des HA-Schemas) und muessen bei jedem Press-Kommando den Callback
+    aufrufen - unabhaengig von irgendeinem vorherigen Zustand."""
+    hub = HADevice(identifiers=("marstek_hub",), name="Marstek Energy Control")
+    resend_entity = HAEntity(
+        component="button", object_id="passive_resend", name="Resend Passive Command",
+        device=hub,
+    )
+
+    received = []
+
+    def on_command(entity, payload):
+        received.append((entity.object_id, payload))
+
+    bridge = HAMqttBridge(BROKER_HOST, BROKER_PORT, node_id="marstek_test5", base_topic="Marstek-Test5")
+    bridge.set_command_callback(on_command)
+
+    collector = asyncio.ensure_future(
+        _collect_messages("homeassistant/button/marstek_test5/passive_resend/config", 1)
+    )
+    await asyncio.sleep(0.2)
+    await bridge.connect()
+    try:
+        await bridge.register_entity(resend_entity)
+        msgs = await collector
+        data = json.loads(msgs[0][1])
+        assert "state_topic" not in data, "button darf keinen state_topic im Discovery-Payload haben"
+        assert data["command_topic"] == "Marstek-Test5/passive_resend/set"
+        assert data["payload_press"] == "PRESS"
+
+        await asyncio.sleep(0.2)  # subscribe muss beim Broker angekommen sein
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="ha-sim-button") as ha:
+            await ha.publish("Marstek-Test5/passive_resend/set", "PRESS", qos=1)
+            await asyncio.sleep(0.1)
+            # zweiter Press mit demselben Payload -> muss trotzdem erneut ankommen
+            await ha.publish("Marstek-Test5/passive_resend/set", "PRESS", qos=1)
+
+        await asyncio.sleep(0.3)
+        assert received == [("passive_resend", "PRESS"), ("passive_resend", "PRESS")], (
+            "Jeder Press muss den Callback auslösen, auch bei identischem Payload"
+        )
+    finally:
+        await bridge.close()

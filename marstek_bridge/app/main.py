@@ -88,7 +88,7 @@ async def _run() -> int:
 
     cfg = MarstekConfig.from_dict(overrides, path=STATE_PATH)
 
-    bridge = MarstekBridge(cfg)
+    bridge = MarstekBridge(cfg, debug_control_logic=debug_control_logic)
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()

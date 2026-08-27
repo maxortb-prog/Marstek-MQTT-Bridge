@@ -50,13 +50,17 @@ ctrl_logger = logging.getLogger("marstek.control_logic")
 
 
 class MarstekBridge:
-    def __init__(self, cfg: MarstekConfig):
+    def __init__(self, cfg: MarstekConfig, *, debug_control_logic: bool = False):
         self.cfg = cfg
         self.udp: Optional[MarstekUDPClient] = None
         self.mqtt: Optional[HAMqttBridge] = None
         self.bundle: Optional[EntityBundle] = None
         self.passive_ctrl: Optional[PassiveController] = None
         self.shelly_averager: Optional[InputAverager] = None
+        # Statisch konfigurierter Grundzustand des ControlLogic-Loggers
+        # (aus logging_settings.debug_control_logic). Beim Verlassen des
+        # Passive-Mode wird dahin zurueckgekehrt (siehe _handle_energy_mode).
+        self._static_debug_control_logic = debug_control_logic
 
         self._poll_tasks: list[asyncio.Task] = []
         self._countdown_task: Optional[asyncio.Task] = None
@@ -288,6 +292,8 @@ class MarstekBridge:
                 await self._handle_passive_cd_time(payload)
             elif entity.object_id == "shelly_debounce_time_s":
                 await self._handle_shelly_debounce_time(payload)
+            elif entity.object_id == "passive_resend":
+                await self._handle_passive_resend()
             else:
                 logger.warning("Kein Handler fuer Kommando auf '%s' registriert", entity.object_id)
         except MarstekCommunicationError:
@@ -326,6 +332,16 @@ class MarstekBridge:
         self.shelly_averager.set_window(value)
         await self.mqtt.publish_state(self.bundle.entities["shelly_debounce_time_s"], value)
 
+    async def _handle_passive_resend(self) -> None:
+        """Sendet das aktuelle Passive-Kommando erneut, ohne den Modus zu
+        wechseln. Loest denselben Codepfad wie das (Neu-)Auswaehlen von
+        'Passive' im Dropdown aus - inkl. Countdown-Reset (nach bestaetigtem
+        Erfolg), Entprellungs-Reset und automatischer ControlLogic-Debug-
+        Aktivierung. Grund: HA's select-Entity feuert beim erneuten
+        Auswaehlen desselben, bereits aktiven Wertes oft keine neue
+        MQTT-Nachricht - dieser Button umgeht das zuverlaessig."""
+        await self._handle_energy_mode("Passive")
+
     async def _handle_dod(self, payload: str) -> None:
         value = int(float(payload))
         result = await self.udp.send_control("DOD.SET", {"value": value})
@@ -348,10 +364,13 @@ class MarstekBridge:
         mode = payload
         if mode == "Auto":
             config = {"mode": "Auto", "auto_cfg": {"enable": 1}}
+            self._leave_passive_mode()
         elif mode == "AI":
             config = {"mode": "AI", "ai_cfg": {"enable": 1}}
+            self._leave_passive_mode()
         elif mode == "Ups":
             config = {"mode": "Ups", "ups_cfg": {"enable": 1}}
+            self._leave_passive_mode()
         elif mode == "Passive":
             # Live-Werte verwenden (ueber HA per passive_default_power/
             # passive_cd_time aenderbar), NICHT die statische Config -
@@ -359,12 +378,12 @@ class MarstekBridge:
             power = self._passive_power_cap
             cd_time = self._passive_cd_time
             config = {"mode": "Passive", "passive_cfg": {"power": int(power), "cd_time": int(cd_time)}}
-            self._start_countdown(cd_time)
             # Entprellungs-Fenster bei jedem (erneuten) manuellen Wechsel in
             # den Passive-Mode zuruecksetzen, damit alte Samples aus einer
             # vorherigen Phase nicht die erste Mittelung verfaelschen.
             if self.shelly_averager is not None:
                 self.shelly_averager.reset()
+            self._enter_passive_mode()
         else:
             logger.warning("Unbekannter Energy-Mode '%s' ignoriert (Manual wird bewusst nicht unterstuetzt)", mode)
             return
@@ -372,6 +391,38 @@ class MarstekBridge:
         result = await self.udp.send_control("ES.SetMode", {"id": 0, "config": config})
         if result.get("set_result"):
             await self.mqtt.publish_state(self.bundle.entities["energy_mode"], mode)
+            if mode == "Passive":
+                # Countdown erst NACH bestaetigtem Erfolg zuruecksetzen (nicht
+                # vorher optimistisch) - sonst wuerde die Anzeige neu starten,
+                # obwohl das Kommando das Geraet nie erreicht hat.
+                self._start_countdown(cd_time)
+
+    def _enter_passive_mode(self) -> None:
+        """Schaltet den ControlLogic-Debug-Logger automatisch auf DEBUG,
+        sobald manuell in den Passive-Mode gewechselt wird - unabhaengig von
+        der statischen Config-Option 'debug_control_logic'. Damit laesst
+        sich sofort pruefen, ob ueberhaupt Shelly-Nachrichten ankommen,
+        ohne vorher extra die Config aendern und neu starten zu muessen."""
+        ctrl_logger.setLevel(logging.DEBUG)
+        topic = self.cfg.get("shelly", "power_topic", default="")
+        if topic:
+            ctrl_logger.info(
+                "Passive-Mode aktiviert - ControlLogic-Debugging automatisch eingeschaltet. "
+                "Shelly-Topic: '%s' (warte auf eingehende Nachrichten)",
+                topic, extra={"category": "CONTROLLOGIC"},
+            )
+        else:
+            ctrl_logger.warning(
+                "Passive-Mode aktiviert, aber KEIN shelly_power_topic konfiguriert - "
+                "die automatische Regelung ist inaktiv, es ist nur manuelle Steuerung ueber HA moeglich.",
+                extra={"category": "CONTROLLOGIC"},
+            )
+
+    def _leave_passive_mode(self) -> None:
+        """Setzt den ControlLogic-Logger beim Verlassen des Passive-Mode auf
+        den statisch konfigurierten Grundzustand zurueck (Option
+        'debug_control_logic'), statt dauerhaft auf DEBUG stehen zu bleiben."""
+        ctrl_logger.setLevel(logging.DEBUG if self._static_debug_control_logic else logging.WARNING)
 
     # ------------------------------------------------------------------ #
     # Passive-Regler <- externe Leistungsmessung (z.B. Shelly)

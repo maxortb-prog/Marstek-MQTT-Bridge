@@ -397,3 +397,97 @@ async def test_shelly_debounce_time_live_adjustable_via_ha(tmp_path):
     finally:
         await bridge.stop()
         server.stop()
+
+
+@pytest.mark.asyncio
+async def test_selecting_passive_via_ha_auto_enables_control_logic_debug(tmp_path):
+    """End-to-End: manuelles Umschalten auf Passive ueber HA muss den
+    ControlLogic-Logger automatisch auf DEBUG stellen, damit sichtbar wird,
+    ob Shelly-Nachrichten ankommen - ohne die Config vorher anpassen zu
+    muessen. Ausserdem muss danach tatsaechlich ein Shelly-Rohwert als
+    DEBUG-Zeile auf diesem Logger auftauchen."""
+    import logging as _logging
+
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    cfg = _test_config(tmp_path, port, shelly={"power_topic": "shellies/em/power"})
+
+    ctrl_logger = _logging.getLogger("marstek.control_logic")
+    ctrl_logger.setLevel(_logging.WARNING)  # statisch aus
+
+    captured_records = []
+    capture_handler = _logging.Handler()
+    capture_handler.emit = lambda record: captured_records.append(record)
+    ctrl_logger.addHandler(capture_handler)
+
+    bridge = MarstekBridge(cfg, debug_control_logic=False)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+        assert ctrl_logger.level == _logging.WARNING
+
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="ha-sim-enable-debug") as ha:
+            await ha.publish("Marstek-Bridge-Control/energy_mode/set", "Passive", qos=1)
+        await asyncio.sleep(0.3)
+
+        assert ctrl_logger.level == _logging.DEBUG, "Passive-Aktivierung haette ControlLogic-Debug einschalten muessen"
+
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="shelly-sim-debugcheck") as shelly:
+            await shelly.publish("shellies/em/power", "-250", qos=0)
+        await asyncio.sleep(0.3)
+
+        messages = [r.getMessage() for r in captured_records]
+        assert any("Shelly-Eingang (roh)" in m for m in messages), (
+            "Shelly-Rohwert haette als ControlLogic-Debug-Zeile auftauchen muessen"
+        )
+    finally:
+        ctrl_logger.removeHandler(capture_handler)
+        ctrl_logger.setLevel(_logging.NOTSET)
+        await bridge.stop()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_passive_resend_button_resends_command_and_resets_countdown(tmp_path):
+    """Kernanforderung: der 'passive_resend'-Button muss das Passive-
+    Kommando erneut senden UND den Countdown ('Passive Countdown
+    Remaining') dabei zuruecksetzen - auch wenn der Modus bereits aktiv
+    war (kein Moduswechsel noetig). Prueft den Countdown-Deadline direkt
+    im Bridge-Objekt (praeziser als ueber die 1s-Tick-MQTT-Anzeige)."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    cfg = _test_config(tmp_path, port, passive_mode={"power": 200, "cd_time": 60, "max_cd_time": 3600})
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="ha-sim-initial-passive") as ha:
+            await ha.publish("Marstek-Bridge-Control/energy_mode/set", "Passive", qos=1)
+        await asyncio.sleep(0.5)
+
+        deadline_after_first = bridge._passive_cd_deadline
+        assert deadline_after_first is not None
+
+        await asyncio.sleep(2.0)  # Zeit verstreichen lassen, Countdown laeuft
+
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="ha-sim-resend") as ha:
+            await ha.publish("Marstek-Bridge-Control/passive_resend/set", "PRESS", qos=1)
+        await asyncio.sleep(0.5)
+
+        deadline_after_resend = bridge._passive_cd_deadline
+        assert deadline_after_resend is not None
+        assert deadline_after_resend > deadline_after_first, (
+            "Der Resend-Button haette den Countdown-Deadline nach vorne verschieben (zuruecksetzen) muessen"
+        )
+
+        # Und: es muss tatsaechlich ein zweites ES.SetMode(Passive) beim Geraet angekommen sein
+        passive_calls = [r for r in server.received
+                          if r["method"] == "ES.SetMode" and r["params"]["config"]["mode"] == "Passive"]
+        assert len(passive_calls) >= 2, "Der Button haette ein zweites ES.SetMode(Passive) senden muessen"
+    finally:
+        await bridge.stop()
+        server.stop()

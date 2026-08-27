@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.0.12
+
+- **Neuer Button `button.passive_resend`** ("Resend Passive Command"):
+  sendet das aktuelle Passive-Kommando erneut, ohne den Modus wechseln zu
+  muessen. Loest das Problem, dass HA's `select`-Entity beim erneuten
+  Klicken auf den bereits aktiven Wert oft keine neue MQTT-Nachricht
+  ausloest. Nutzt denselben Codepfad wie das (Neu-)Auswaehlen von "Passive"
+  (Countdown-Reset, Entprellungs-Reset, automatische ControlLogic-Debug-
+  Aktivierung).
+- `mqtt_ha.py` um Unterstuetzung fuer die HA-Komponente `button` erweitert
+  (zustandslose Aktions-Entity, kein `state_topic` im Discovery-Schema,
+  `payload_press`).
+- **Bugfix**: Der Countdown ("Passive Countdown Remaining") wurde beim
+  manuellen Wechsel in den Passive-Mode bisher optimistisch VOR dem
+  eigentlichen Senden zurueckgesetzt, auch wenn das Kommando das Geraet nie
+  erreicht hat. Wird jetzt korrekt erst nach bestaetigtem `set_result`
+  zurueckgesetzt (analog zum automatischen Shelly-Pfad).
+
+## 0.0.11
+
+- **Automatische ControlLogic-Debug-Aktivierung beim Wechsel in Passive**:
+  Unabhaengig von der Config-Option `debug_control_logic` schaltet die
+  Bridge den ControlLogic-Logger jetzt automatisch auf DEBUG, sobald
+  manuell ueber `select.energy_mode` in den Passive-Mode gewechselt wird -
+  inkl. sofortiger Diagnosemeldung, ob ueberhaupt ein `shelly_power_topic`
+  konfiguriert ist. Damit laesst sich direkt pruefen, ob der Shelly-Eingang
+  ankommt, ohne vorher die Konfiguration zu aendern und neu zu starten.
+  Beim Verlassen von Passive kehrt der Logger zum konfigurierten
+  Grundzustand zurueck.
+
 ## 0.0.10
 
 - **Neuer Debug-Kanal "Debugging - ControlLogic"** (`logging_settings.debug_control_logic`,
