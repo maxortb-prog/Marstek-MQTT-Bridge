@@ -447,8 +447,30 @@ class MarstekBridge:
             extra={"category": "CONTROLLOGIC"},
         )
 
-        # Zielwert fuer den Marstek = -Netzleistung (Netzbezug/-einspeisung auf 0 regeln)
-        target = -smoothed_power
+        # Zielwert fuer den Marstek: INTEGRALE Regelung, nicht direkte
+        # Zielwertvorgabe. Der Shelly misst den TATSAECHLICHEN Netzbezug
+        # (positiv) bzw. die Einspeisung (negativ) AN DER MESSSTELLE -
+        # inklusive dem, was der Marstek selbst gerade tut. Ein direktes
+        # "target = -smoothed_power" wuerde eine Mitkopplung erzeugen: Laden
+        # (negativer Sollwert) erhoeht den gemessenen Netzbezug, was
+        # faelschlich als "noch mehr laden noetig" interpretiert wuerde ->
+        # Aufschaukeln statt Stabilisierung.
+        #
+        # Korrekte Herleitung: netzbezug = (last - pv) - aktueller_sollwert
+        # (aktueller_sollwert positiv=einspeisen/entladen, negativ=laden).
+        # Fuer netzbezug_neu = 0 mit neuem Sollwert gilt:
+        #   neuer_sollwert = aktueller_sollwert + netzbezug_gemessen
+        # Das ist ein integrierender Regelschritt: der gemessene Fehler wird
+        # auf den bestehenden Sollwert aufaddiert, nicht ersetzt.
+        current_setpoint = self.passive_ctrl.state.committed_setpoint_w
+        if current_setpoint is None:
+            current_setpoint = 0.0
+        target = current_setpoint + smoothed_power
+        ctrl_logger.debug(
+            "Integrale Zielwertberechnung: aktueller Sollwert=%.1f W + Netzbezug=%.1f W -> Ziel=%.1f W",
+            current_setpoint, smoothed_power, target,
+            extra={"category": "CONTROLLOGIC"},
+        )
         cmd = self.passive_ctrl.update(target)
         if cmd is None:
             return

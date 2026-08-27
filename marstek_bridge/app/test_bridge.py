@@ -238,7 +238,8 @@ async def test_shelly_power_drives_passive_controller_and_sends_command(tmp_path
     server = FakeMarstekServer()
     port = await server.start()
     _setup_full_server_behavior(server)
-    cfg = _test_config(tmp_path, port, shelly={"power_topic": "shellies/em/power"})
+    cfg = _test_config(tmp_path, port, shelly={"power_topic": "shellies/em/power"},
+                        passive_mode={"power": 1500, "cd_time": 60, "max_cd_time": 3600})
 
     bridge = MarstekBridge(cfg)
     await asyncio.sleep(0.1)
@@ -246,7 +247,9 @@ async def test_shelly_power_drives_passive_controller_and_sends_command(tmp_path
         await bridge.start()
 
         async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="shelly-sim") as shelly:
-            # Haushalt bezieht 300W aus dem Netz -> Marstek soll mit -300W (laden) regeln? Ziel: -raw_power
+            # Haushalt bezieht 300W aus dem Netz (kein vorheriger Sollwert,
+            # Basis=0W) -> integrale Regelung: neuer Sollwert = 0 + 300 = 300
+            # (einspeisen/entladen, um den Netzbezug zu decken)
             await shelly.publish("shellies/em/power", "300", qos=0)
 
         await asyncio.sleep(0.5)
@@ -255,7 +258,7 @@ async def test_shelly_power_drives_passive_controller_and_sends_command(tmp_path
         passive_calls = [c for c in set_mode_calls if c["params"]["config"]["mode"] == "Passive"]
         assert passive_calls, "Passive-Regler hat kein ES.SetMode gesendet"
         last_power = passive_calls[-1]["params"]["config"]["passive_cfg"]["power"]
-        assert last_power == -300
+        assert last_power == 300
     finally:
         await bridge.stop()
         server.stop()
@@ -284,11 +287,11 @@ async def test_ha_can_dynamically_lower_passive_power_cap_via_soc_automation(tmp
         assert bridge._passive_power_cap == 150.0
         assert bridge.passive_ctrl._discharge_cap_w == 150.0
 
-        # Haushalt braucht 500W aus dem Netz -> ohne Deckel wuerde die
-        # Regelung mit -500W (aus Marstek-Sicht: einspeisen/entladen) senden,
-        # der Deckel muss das auf 150W begrenzen.
+        # Haushalt bezieht 500W aus dem Netz (kein vorheriger Sollwert, Basis=0W)
+        # -> integrale Regelung wuerde 0+500=500W einspeisen/entladen wollen,
+        # der SOC-Deckel (150W) muss das begrenzen.
         async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="shelly-sim-soc") as shelly:
-            await shelly.publish("shellies/em/power", "-500", qos=0)
+            await shelly.publish("shellies/em/power", "500", qos=0)
         await asyncio.sleep(0.4)
 
         passive_calls = [r for r in server.received
@@ -364,10 +367,13 @@ async def test_shelly_debounce_smooths_noisy_readings(tmp_path):
                           if r["method"] == "ES.SetMode" and r["params"]["config"]["mode"] == "Passive"]
         assert passive_calls, "Passive-Regler haette senden muessen"
         last_power = passive_calls[-1]["params"]["config"]["passive_cfg"]["power"]
-        # Mittelwert aus (-100,-100,-2000)/3 = -733 (Ziel=+733), NICHT der volle
-        # Ausreisser-Zielwert von +2000
-        assert last_power != 2000
-        assert 600 <= last_power <= 800, f"unerwarteter gemittelter Wert: {last_power}"
+        # Ohne Entprellung wuerde die 3. Nachricht (Rohwert -2000, integral
+        # auf den Sollwert von -200 aufaddiert) auf -2200 -> geklemmt auf
+        # -1500 (min_output_w) fuehren. Mit 30s-Fenster wird stattdessen der
+        # gemittelte Wert (-100,-100,-2000)/3=-733.3 verwendet: -200 + (-733.3)
+        # = -933.3 -> deutlich weniger extrem als die geklemmte Grenze.
+        assert last_power != -1500, "Entprellung haette den Ausreisser abfedern sollen (nicht bis ans Limit)"
+        assert -960 <= last_power <= -900, f"unerwarteter gemittelter Wert: {last_power}"
     finally:
         await bridge.stop()
         server.stop()
@@ -488,6 +494,57 @@ async def test_passive_resend_button_resends_command_and_resets_countdown(tmp_pa
         passive_calls = [r for r in server.received
                           if r["method"] == "ES.SetMode" and r["params"]["config"]["mode"] == "Passive"]
         assert len(passive_calls) >= 2, "Der Button haette ein zweites ES.SetMode(Passive) senden muessen"
+    finally:
+        await bridge.stop()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_integral_control_law_stabilizes_instead_of_runaway(tmp_path):
+    """Regressionstest fuer den in der Praxis beobachteten Fehler: der
+    Shelly misst den TATSAECHLICHEN Netzbezug inklusive der aktuellen
+    Batterieleistung. Eine direkte 'target = -shelly' Abbildung wuerde bei
+    steigendem Netzbezug (z.B. weil der Marstek selbst gerade laedt) immer
+    staerker laden -> Mitkopplung/Aufschaukeln. Die korrekte integrale
+    Regelung (neuer Sollwert = aktueller Sollwert + Netzbezug) muss
+    stattdessen zur Stabilisierung tendieren, nicht zum Aufschaukeln."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    cfg = _test_config(tmp_path, port, shelly={"power_topic": "shellies/em/power", "debounce_time_s": 0},
+                        controller={"deadzone_w": 1, "min_setpoint_change_w": 1, "max_step_w": 5000,
+                                    "min_output_w": -1500, "max_output_w": 800, "min_send_interval_s": 0},
+                        passive_mode={"power": 1500, "cd_time": 60, "max_cd_time": 3600})
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+
+        # Simuliert exakt das beobachtete Szenario: Haushaltslast konstant bei
+        # 310W (unabhaengig vom Batteriezustand). Erste Messung erfolgt WAEHREND
+        # der Sollwert noch 0 ist -> Netzbezug = 310 - 0 = 310.
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="shelly-sim-stability") as shelly:
+            await shelly.publish("shellies/em/power", "310", qos=0)
+        await asyncio.sleep(0.3)
+
+        first_power = bridge.passive_ctrl.state.last_sent_setpoint_w
+        # Bei Basis=0 sollte die Regelung ca. +310 (voll einspeisen/entladen) anstreben
+        assert first_power == pytest.approx(310, abs=5)
+
+        # Nach dieser Aktion "sieht" der Shelly (bei konstanter Last von 310W und
+        # jetzigem Sollwert von ~310) einen Netzbezug nahe 0 - die Regelung
+        # sollte sich stabilisieren, NICHT weiter eskalieren.
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="shelly-sim-stability2") as shelly:
+            await shelly.publish("shellies/em/power", "0", qos=0)
+        await asyncio.sleep(0.3)
+
+        second_power = bridge.passive_ctrl.state.last_sent_setpoint_w
+        # Sollwert darf sich jetzt kaum noch aendern (stabiler Zustand erreicht),
+        # NICHT immer weiter in dieselbe Richtung explodieren
+        assert abs(second_power - first_power) < 20, (
+            f"Regelung eskaliert statt zu stabilisieren: {first_power} -> {second_power}"
+        )
     finally:
         await bridge.stop()
         server.stop()

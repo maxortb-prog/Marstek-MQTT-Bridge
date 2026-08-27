@@ -78,6 +78,20 @@ einer externen Leistungsmessung (`shelly_power_topic`) einen ruhigen
 Passive-Mode-Sollwert fuer den Marstek berechnet, statt auf jede Spitze zu
 reagieren.
 
+**Wichtig - Anforderung an die Messstelle:** `shelly_power_topic` muss den
+**tatsächlichen Netzbezug (positiv) bzw. die Einspeisung (negativ) an der
+Netzeinspeisestelle** liefern - also inklusive dem, was der Marstek gerade
+selbst tut (Laden erhöht den gemessenen Netzbezug, Entladen senkt ihn). Die
+Regelung ist **integrierend**: `neuer Sollwert = aktueller Sollwert +
+gemessener Netzbezug`, NICHT eine direkte Zielwertvorgabe. Das ist
+notwendig, weil eine direkte Abbildung (`Ziel = -Messwert`) bei dieser
+Messstelle zu einer **Mitkopplung** führen würde: Laden erhöht den
+gemessenen Netzbezug, was fälschlich als "noch mehr laden nötig"
+interpretiert würde - ein Aufschaukeln statt einer Stabilisierung. Mit der
+integrierenden Regelung konvergiert der Sollwert stattdessen bei
+konstanter Last in einem Schritt exakt auf den Wert, der den Netzbezug auf
+null bringt.
+
 | Option | Standard | Bedeutung |
 |---|---|---|
 | `deadzone_w` | 40 | Rauschunterdrueckung, W |
@@ -86,7 +100,7 @@ reagieren.
 | `min_output_w` | -1500 | Harte Ladegrenze (negativ = Laden). Vom `power`-Deckel NICHT beeinflussbar. |
 | `max_output_w` | 800 | Harte Einspeisegrenze - der Marstek koennte physisch mehr, das ist eine bewusste Zusatzbegrenzung. Der `power`-Deckel (siehe "Passiv Mode Settings") kann diese Grenze nur verschaerfen, nie ueberschreiten. |
 | `min_send_interval_s` | 30 | Mindestabstand zwischen zwei Sendungen, 0-60s (0 = kein Mindestabstand) |
-| `shelly_power_topic` | (leer) | MQTT-Topic einer externen Leistungsmessung (z.B. Shelly EM), treibt den automatischen Regler an. Leer = Regler deaktiviert, nur manuelle Passive-Steuerung ueber HA moeglich |
+| `shelly_power_topic` | (leer) | MQTT-Topic einer externen Leistungsmessung (z.B. Shelly EM) **an der Netzeinspeisestelle** (siehe oben), treibt den automatischen Regler an. Leer = Regler deaktiviert, nur manuelle Passive-Steuerung ueber HA moeglich |
 | `shelly_debounce_time_s` | 10.0 | Mittelungsfenster (Sekunden, 0-300, 0 = deaktiviert) fuer den rohen Leistungswert, BEVOR er in die Regellogik einfliesst - glaettet kurze Ausreisser/Rauschen. Zur Laufzeit ueber `number.shelly_debounce_time_s` aenderbar; wird beim (erneuten) manuellen Wechsel in den Passive-Mode automatisch zurueckgesetzt (frische Mittelung, alte Samples verworfen). |
 
 ### Abschnitt "Message Settings"

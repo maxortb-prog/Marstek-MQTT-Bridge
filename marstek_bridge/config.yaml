@@ -1,5 +1,5 @@
 name: "Marstek MQTT Bridge"
-version: "0.0.12"
+version: "0.1.0"
 slug: "marstek_bridge"
 description: >-
   Bruecke zwischen einem Marstek Energiespeicher (lokale UDP-API) und Home

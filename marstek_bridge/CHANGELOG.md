@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.0
+
+- **Kritischer Regelungsfix**: Die Berechnung des Zielwerts fuer den
+  automatischen Passive-Regler war fehlerhaft und konnte bei einer
+  Messstelle, die den TATSAECHLICHEN Netzbezug inkl. der Batterieleistung
+  misst, zu einer **Mitkopplung (Aufschaukeln statt Stabilisierung)**
+  fuehren: Laden erhoehte den gemessenen Netzbezug, was faelschlich als
+  "noch mehr laden noetig" interpretiert wurde. Die direkte Zielwertvorgabe
+  (`target = -Messwert`) wurde durch eine **integrierende Regelung**
+  ersetzt (`neuer Sollwert = aktueller Sollwert + gemessener Netzbezug`),
+  die bei konstanter Last in einem Schritt korrekt konvergiert statt zu
+  eskalieren. In der Praxis beobachtet und gemeldet durch einen Nutzer, der
+  ein Aufschaukeln bei realer Shelly-Anbindung feststellte.
+- DOCS.md um eine explizite Anforderung an die Messstelle ergaenzt: der
+  konfigurierte Topic muss den Netzbezug INKLUSIVE der aktuellen
+  Batterieleistung liefern (z.B. eine Messung am Netzanschlusspunkt), nicht
+  eine reine Haushaltslast ohne Batteriebeitrag.
+- Neuer Regressionstest, der genau das beobachtete Szenario nachstellt
+  (konstante Last, Regelung muss sich stabilisieren statt zu eskalieren).
+
 ## 0.0.12
 
 - **Neuer Button `button.passive_resend`** ("Resend Passive Command"):
