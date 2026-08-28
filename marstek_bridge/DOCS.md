@@ -114,6 +114,8 @@ tatsächlichen Gerätezustand auf, nicht auf einer Annahme von 0W.
 | `min_output_w` | -1500 | Harte Ladegrenze (negativ = Laden). Vom `power`-Deckel NICHT beeinflussbar. |
 | `max_output_w` | 800 | Harte Einspeisegrenze - der Marstek koennte physisch mehr, das ist eine bewusste Zusatzbegrenzung. Der `power`-Deckel (siehe "Passiv Mode Settings") kann diese Grenze nur verschaerfen, nie ueberschreiten. |
 | `min_send_interval_s` | 30 | Mindestabstand zwischen zwei Sendungen, 0-60s (0 = kein Mindestabstand) |
+| `idle_soc_threshold` | 5.0 | SOC (%), unter dem die automatische Passive-Regelung komplett pausiert: es wird nichts mehr gesendet, die geräteseitige `cd_time` läuft natürlich ab, das Gerät fällt in Idle zurück. SOC-Quelle: der jeweils zuletzt aktualisierte Wert aus `Bat.GetStatus.soc` **oder** `ES.GetStatus.bat_soc` (unterschiedliche Poll-Intervalle möglich - "wer zuletzt aktualisiert, gewinnt"). Zur Laufzeit über `number.idle_soc_threshold` änderbar. |
+| `idle_soc_resume_margin` | 3.0 | Hysterese (%): die Regelung startet erst wieder, wenn der SOC `idle_soc_threshold + diesen Wert` erreicht - verhindert schnelles Pausieren/Wiederanspringen direkt an der Schwelle. |
 | `shelly_power_topic` | (leer) | MQTT-Topic einer externen Leistungsmessung (z.B. Shelly EM) **an der Netzeinspeisestelle** (siehe oben), treibt den automatischen Regler an. Leer = Regler deaktiviert, nur manuelle Passive-Steuerung ueber HA moeglich |
 | `shelly_debounce_time_s` | 10.0 | Mittelungsfenster (Sekunden, 0-300, 0 = deaktiviert) fuer den rohen Leistungswert, BEVOR er in die Regellogik einfliesst - glaettet kurze Ausreisser/Rauschen. Zur Laufzeit ueber `number.shelly_debounce_time_s` aenderbar; wird beim (erneuten) manuellen Wechsel in den Passive-Mode automatisch zurueckgesetzt (frische Mittelung, alte Samples verworfen). |
 
@@ -230,6 +232,11 @@ Wichtige Control-Entities fuer den Passive-Mode:
   zuverlaessig, da Button-Entities bei jedem Druck garantiert senden.
   Setzt dabei auch den Countdown ("Passive Countdown Remaining") zurueck
   und aktiviert automatisch das ControlLogic-Debugging (siehe oben).
+- `number.idle_soc_threshold` - SOC-Schwelle fuer die Idle-Pausierung
+  (siehe "Selfconsumption Control Parameters" oben).
+- `binary_sensor.passive_idle_low_soc` - zeigt an, ob die automatische
+  Passive-Regelung gerade wegen zu niedrigem SOC pausiert. Eignet sich als
+  Ausloeser fuer eine Benachrichtigung ("Akku fast leer, Regelung pausiert").
 
 ## Watchdog / automatischer Neustart
 

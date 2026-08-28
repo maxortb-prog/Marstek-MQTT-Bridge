@@ -73,6 +73,16 @@ DEFAULT_CONFIG: dict = {
         "max_output_w": 800,     # harte Einspeisegrenze - Marstek koennte mehr,
                                  # das ist aktuell eine bewusste Zusatzbegrenzung
         "min_send_interval_s": 30,
+        "idle_soc_threshold": 5.0,       # SOC-Schwelle [%], unter der die automatische
+                                          # Passive-Regelung pausiert (kein Senden mehr,
+                                          # cd_time laeuft ab -> Geraet faellt in Idle).
+                                          # SOC-Quelle: der jeweils zuletzt aktualisierte
+                                          # Wert aus Bat.GetStatus.soc ODER
+                                          # ES.GetStatus.bat_soc (unterschiedliche
+                                          # Poll-Intervalle moeglich).
+        "idle_soc_resume_margin": 3.0,   # Hysterese [%]: Regelung startet erst wieder,
+                                          # wenn SOC >= idle_soc_threshold + dieser Wert
+                                          # (verhindert Aufflattern an der Schwelle).
     },
     # ── Message Settings (laufender Poll-/Control-Betrieb) ───────────────
     "message_settings": {
@@ -180,6 +190,10 @@ class MarstekConfig:
             raise ConfigError("controller.min_send_interval_s muss zwischen 0 und 60 liegen")
         if float(ctrl["min_output_w"]) >= float(ctrl["max_output_w"]):
             raise ConfigError("controller.min_output_w muss kleiner als max_output_w sein")
+        if not (0 <= float(ctrl.get("idle_soc_threshold", 5.0)) <= 100):
+            raise ConfigError("controller.idle_soc_threshold muss zwischen 0 und 100 liegen")
+        if not (0 <= float(ctrl.get("idle_soc_resume_margin", 3.0)) <= 100):
+            raise ConfigError("controller.idle_soc_resume_margin muss zwischen 0 und 100 liegen")
 
         pm = self._data["passive_mode"]
         if not (0 < int(pm["cd_time"]) <= int(pm["max_cd_time"])):

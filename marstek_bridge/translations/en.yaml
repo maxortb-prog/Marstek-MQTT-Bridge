@@ -97,6 +97,12 @@ configuration:
       min_send_interval_s:
         name: "Minimum send interval"
         description: "Minimum time between two sent commands, 0-60s (0 = no minimum, send immediately when needed)."
+      idle_soc_threshold:
+        name: "Idle SOC threshold"
+        description: "SOC (%) below which the automatic Passive-mode regulation pauses entirely: no more commands are sent, the device's own cd_time countdown expires naturally, and it falls back to idle. SOC source: whichever of Bat.GetStatus.soc / ES.GetStatus.bat_soc updated most recently. Adjustable live via number.idle_soc_threshold."
+      idle_soc_resume_margin:
+        name: "Idle SOC resume margin"
+        description: "Hysteresis (%): automatic regulation resumes only once SOC reaches idle_soc_threshold + this margin, preventing rapid pause/resume flapping right at the threshold."
       shelly_power_topic:
         name: "External power measurement topic"
         description: "MQTT topic of an external power measurement (e.g. Shelly EM) driving the automatic controller. Leave empty to disable automatic regulation (manual Passive control via Home Assistant still works)."

@@ -750,3 +750,136 @@ async def test_first_shelly_update_after_restart_uses_seeded_setpoint_not_zero(t
     finally:
         await bridge.stop()
         server.stop()
+
+
+@pytest.mark.asyncio
+async def test_low_soc_pauses_automatic_regulation_no_send(tmp_path):
+    """Kernanforderung: faellt der SOC unter die Idle-Schwelle, darf die
+    Bridge KEINE Passive-Kommandos mehr senden (weder Update noch
+    Keepalive) - die cd_time soll auf dem Geraet natuerlich ablaufen."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    server.set_behavior("Bat.GetStatus", MethodBehavior(result={"soc": 3}))  # < Schwelle
+    cfg = _test_config(tmp_path, port, shelly={"power_topic": "shellies/em/power", "debounce_time_s": 0},
+                        controller={"deadzone_w": 1, "min_setpoint_change_w": 1, "max_step_w": 5000,
+                                    "min_output_w": -1500, "max_output_w": 800, "min_send_interval_s": 0,
+                                    "idle_soc_threshold": 5.0, "idle_soc_resume_margin": 3.0},
+                        status_polling={"bat_status_interval_s": 999999, "es_mode_interval_s": 999999,
+                                        "es_status_interval_s": 999999})
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+        assert bridge._latest_battery_soc == 3.0  # aus der Init-Sequenz uebernommen
+
+        calls_before = len([r for r in server.received if r["method"] == "ES.SetMode"])
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="shelly-sim-lowsoc") as shelly:
+            await shelly.publish("shellies/em/power", "300", qos=0)
+        await asyncio.sleep(0.3)
+
+        calls_after = len([r for r in server.received if r["method"] == "ES.SetMode"])
+        assert calls_after == calls_before, "Bei zu niedrigem SOC darf kein ES.SetMode gesendet werden"
+        assert bridge._passive_idle_low_soc is True
+    finally:
+        await bridge.stop()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_soc_recovery_resumes_regulation_with_hysteresis(tmp_path):
+    """Nach Erholung des SOC ueber threshold+margin muss die Regelung
+    automatisch wieder anspringen."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    server.set_behavior("Bat.GetStatus", MethodBehavior(result={"soc": 3}))
+    cfg = _test_config(tmp_path, port, shelly={"power_topic": "shellies/em/power", "debounce_time_s": 0},
+                        controller={"deadzone_w": 1, "min_setpoint_change_w": 1, "max_step_w": 5000,
+                                    "min_output_w": -1500, "max_output_w": 800, "min_send_interval_s": 0,
+                                    "idle_soc_threshold": 5.0, "idle_soc_resume_margin": 3.0},
+                        status_polling={"bat_status_interval_s": 999999, "es_mode_interval_s": 999999,
+                                        "es_status_interval_s": 999999},
+                        passive_mode={"power": 1500, "cd_time": 60, "max_cd_time": 3600})
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+
+        # zunaechst niedriger SOC -> Idle
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="shelly-sim-a") as shelly:
+            await shelly.publish("shellies/em/power", "300", qos=0)
+        await asyncio.sleep(0.2)
+        assert bridge._passive_idle_low_soc is True
+
+        # SOC erholt sich NUR knapp ueber die Schwelle (aber unter Hysterese) -> bleibt idle
+        bridge._latest_battery_soc = 6.0  # < 5.0+3.0=8.0
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="shelly-sim-b") as shelly:
+            await shelly.publish("shellies/em/power", "300", qos=0)
+        await asyncio.sleep(0.2)
+        assert bridge._passive_idle_low_soc is True, "Hysterese haette ein zu frühes Wiederanspringen verhindern muessen"
+
+        # SOC erholt sich ueber die Wiederaufnahme-Schwelle -> Regelung springt an
+        bridge._latest_battery_soc = 9.0  # >= 8.0
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="shelly-sim-c") as shelly:
+            await shelly.publish("shellies/em/power", "300", qos=0)
+        await asyncio.sleep(0.3)
+        assert bridge._passive_idle_low_soc is False
+
+        calls = [r for r in server.received if r["method"] == "ES.SetMode"
+                 and r["params"]["config"]["mode"] == "Passive"]
+        assert calls, "Nach Wiederaufnahme haette wieder gesendet werden muessen"
+    finally:
+        await bridge.stop()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_soc_tracked_from_whichever_source_updates_last(tmp_path):
+    """Kernanforderung: der SOC-Wert kommt vom jeweils zuletzt
+    aktualisierenden Poll (Bat.GetStatus ODER ES.GetStatus)."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    server.set_behavior("Bat.GetStatus", MethodBehavior(result={"soc": 50}))
+    server.set_behavior("ES.GetStatus", MethodBehavior(result={"bat_soc": 42}))
+    cfg = _test_config(tmp_path, port, status_polling={
+        "bat_status_interval_s": 999999, "es_mode_interval_s": 999999, "es_status_interval_s": 0.3,
+    })
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+        # Init setzt zunaechst battery_status.soc (50) als Startwert
+        assert bridge._latest_battery_soc == 50.0
+        # ES.GetStatus pollt periodisch (0.3s) und aktualisiert bat_soc=42 danach
+        await asyncio.sleep(0.5)
+        assert bridge._latest_battery_soc == 42.0, "Der zuletzt aktualisierte Wert (ES.GetStatus) haette gewinnen muessen"
+    finally:
+        await bridge.stop()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_idle_soc_threshold_live_adjustable_via_ha(tmp_path):
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    cfg = _test_config(tmp_path, port)
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+        assert bridge._idle_soc_threshold == 5.0  # Standard aus _test_config-Vererbung
+
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="ha-sim-idle-thresh") as ha:
+            await ha.publish("Marstek-Bridge-Control/idle_soc_threshold/set", "10", qos=1)
+        await asyncio.sleep(0.2)
+        assert bridge._idle_soc_threshold == 10.0
+    finally:
+        await bridge.stop()
+        server.stop()

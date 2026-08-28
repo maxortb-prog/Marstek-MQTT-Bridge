@@ -162,6 +162,18 @@ class MarstekBridge:
                     last_known_output,
                 )
 
+        # Idle-bei-niedrigem-SOC: jeweils zuletzt aktualisierter SOC-Wert aus
+        # Bat.GetStatus.soc ODER ES.GetStatus.bat_soc (unterschiedliche
+        # Poll-Intervalle moeglich - "wer zuerst aktualisiert, gewinnt").
+        self._latest_battery_soc: Optional[float] = None
+        if isinstance(startup_result.battery_status, dict) and startup_result.battery_status.get("soc") is not None:
+            self._latest_battery_soc = float(startup_result.battery_status["soc"])
+        elif isinstance(startup_result.es_status, dict) and startup_result.es_status.get("bat_soc") is not None:
+            self._latest_battery_soc = float(startup_result.es_status["bat_soc"])
+        self._idle_soc_threshold = float(ctrl_cfg.get("idle_soc_threshold", 5.0))
+        self._idle_soc_resume_margin = float(ctrl_cfg.get("idle_soc_resume_margin", 3.0))
+        self._passive_idle_low_soc = False
+
         shelly_cfg = self.cfg.raw["shelly"]
         self._shelly_debounce_time_s = float(shelly_cfg.get("debounce_time_s", 0.0))
         self.shelly_averager = InputAverager(window_s=self._shelly_debounce_time_s)
@@ -264,6 +276,8 @@ class MarstekBridge:
         await self.mqtt.publish_state(e["passive_cd_time"],
                                        self.cfg.get("passive_mode", "cd_time", default=60))
         await self.mqtt.publish_state(e["shelly_debounce_time_s"], self._shelly_debounce_time_s)
+        await self.mqtt.publish_state(e["idle_soc_threshold"], self._idle_soc_threshold)
+        await self.mqtt.publish_state(e["passive_idle_low_soc"], self._passive_idle_low_soc)
         ble_broadcast_on = int(self.cfg.get("ble_block", "startup_enable", default=0)) == 0
         await self.mqtt.publish_state(e["ble_broadcast"], ble_broadcast_on)
         led_on = int(self.cfg.get("led", "startup_state", default=0)) == 1
@@ -315,9 +329,13 @@ class MarstekBridge:
 
     async def _on_battery_status(self, result: dict) -> None:
         await self._publish_mapped(result, self.bundle.field_map_battery)
+        if isinstance(result, dict) and result.get("soc") is not None:
+            self._latest_battery_soc = float(result["soc"])
 
     async def _on_es_status(self, result: dict) -> None:
         await self._publish_mapped(result, self.bundle.field_map_es_status)
+        if isinstance(result, dict) and result.get("bat_soc") is not None:
+            self._latest_battery_soc = float(result["bat_soc"])
 
     async def _on_es_mode(self, result: dict) -> None:
         await self._publish_mapped(result, self.bundle.field_map_es_mode)
@@ -346,6 +364,8 @@ class MarstekBridge:
                 await self._handle_passive_cd_time(payload)
             elif entity.object_id == "shelly_debounce_time_s":
                 await self._handle_shelly_debounce_time(payload)
+            elif entity.object_id == "idle_soc_threshold":
+                await self._handle_idle_soc_threshold(payload)
             elif entity.object_id == "passive_resend":
                 await self._handle_passive_resend()
             else:
@@ -385,6 +405,44 @@ class MarstekBridge:
         self._shelly_debounce_time_s = value
         self.shelly_averager.set_window(value)
         await self.mqtt.publish_state(self.bundle.entities["shelly_debounce_time_s"], value)
+
+    async def _handle_idle_soc_threshold(self, payload: str) -> None:
+        """Aendert die SOC-Idle-Schwelle live. Wirkt sofort - ein bereits
+        laufender Idle-Zustand wird beim naechsten Shelly-Zyklus neu
+        bewertet (siehe _update_idle_state)."""
+        value = float(payload)
+        if not (0 <= value <= 100):
+            logger.warning("Ungueltiger Wert fuer idle_soc_threshold (%s) ignoriert", payload)
+            return
+        self._idle_soc_threshold = value
+        await self.mqtt.publish_state(self.bundle.entities["idle_soc_threshold"], value)
+
+    async def _update_idle_state(self) -> None:
+        """Idle-bei-niedrigem-SOC mit Hysterese: pausiert die automatische
+        Passive-Regelung (kein Senden mehr, cd_time laeuft auf dem Geraet
+        ab -> faellt in Idle), sobald der zuletzt bekannte SOC unter
+        idle_soc_threshold faellt. Startet erst wieder, wenn der SOC
+        mindestens idle_soc_threshold + idle_soc_resume_margin erreicht
+        (verhindert Aufflattern direkt an der Schwelle)."""
+        if self._latest_battery_soc is None:
+            return
+        soc = self._latest_battery_soc
+
+        if not self._passive_idle_low_soc and soc <= self._idle_soc_threshold:
+            self._passive_idle_low_soc = True
+            logger.warning(
+                "Passive-Regelung pausiert: SOC (%.1f%%) <= Idle-Schwelle (%.1f%%) - "
+                "cd_time laeuft ab, Geraet faellt in Idle",
+                soc, self._idle_soc_threshold,
+            )
+            await self.mqtt.publish_state(self.bundle.entities["passive_idle_low_soc"], True)
+        elif self._passive_idle_low_soc and soc >= (self._idle_soc_threshold + self._idle_soc_resume_margin):
+            self._passive_idle_low_soc = False
+            logger.info(
+                "Passive-Regelung wieder aktiv: SOC (%.1f%%) >= Wiederaufnahme-Schwelle (%.1f%%)",
+                soc, self._idle_soc_threshold + self._idle_soc_resume_margin,
+            )
+            await self.mqtt.publish_state(self.bundle.entities["passive_idle_low_soc"], False)
 
     async def _handle_passive_resend(self) -> None:
         """Sendet das aktuelle Passive-Kommando erneut, ohne den Modus zu
@@ -487,6 +545,14 @@ class MarstekBridge:
             raw_power = float(payload)
         except ValueError:
             logger.warning("Ungueltiger Leistungswert auf %s: %r", topic, payload)
+            return
+
+        await self._update_idle_state()
+        if self._passive_idle_low_soc:
+            ctrl_logger.debug(
+                "Passive-Regelung pausiert (SOC zu niedrig) - Shelly-Wert %.1f W ignoriert",
+                raw_power, extra={"category": "CONTROLLOGIC"},
+            )
             return
 
         ctrl_logger.debug("Shelly-Eingang (roh): %.1f W", raw_power,

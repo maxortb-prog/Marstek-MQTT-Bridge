@@ -101,6 +101,8 @@ def build_overrides(options: dict, *, mqtt_host_override: Optional[str] = None,
             "min_output_w": float(ctrl.get("min_output_w", -1500)),
             "max_output_w": float(ctrl.get("max_output_w", 800)),
             "min_send_interval_s": float(ctrl.get("min_send_interval_s", 30)),
+            "idle_soc_threshold": float(ctrl.get("idle_soc_threshold", 5.0)),
+            "idle_soc_resume_margin": float(ctrl.get("idle_soc_resume_margin", 3.0)),
         },
         "message_settings": {
             "max_retry": int(msg.get("max_retry", 3)),

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.0
+
+- **Neue Funktion: Idle bei niedrigem SOC.** Die automatische Passive-
+  Regelung pausiert jetzt komplett, sobald der Batterie-SOC unter eine
+  konfigurierbare Schwelle (`idle_soc_threshold`, Standard 5%) faellt: es
+  wird kein Kommando mehr gesendet (weder Update noch Keepalive), die
+  geraeteseitige `cd_time` laeuft dadurch natuerlich ab und das Geraet
+  faellt in seinen eigenen Idle-/Sicherheitszustand zurueck. Die SOC-
+  Quelle ist dabei bewusst flexibel: es wird immer der jeweils zuletzt
+  aktualisierte Wert aus `Bat.GetStatus.soc` ODER `ES.GetStatus.bat_soc`
+  verwendet, da beide unterschiedliche Poll-Intervalle haben koennen.
+  Eine Hysterese (`idle_soc_resume_margin`, Standard 3%) verhindert
+  schnelles Pausieren/Wiederanspringen direkt an der Schwelle - die
+  Regelung startet erst wieder, wenn der SOC `idle_soc_threshold +
+  idle_soc_resume_margin` erreicht. Neue HA-Entities:
+  `number.idle_soc_threshold` (live aenderbar) und
+  `binary_sensor.passive_idle_low_soc` (Statusanzeige, eignet sich fuer
+  Benachrichtigungs-Automatisierungen).
+
 ## 0.2.3
 
 - **Bugfix: Init-Sequenz faelschlich vom Laufzeit-Pacing-Gate ausgebremst.**

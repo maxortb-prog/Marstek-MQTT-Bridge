@@ -211,6 +211,10 @@ def build_entities(cfg: MarstekConfig, ble_mac: str, device_type: str) -> Entity
                  unit_of_measurement="s", icon="mdi:sine-wave", min_value=0, max_value=300, step=1))
     add(HAEntity("button", "passive_resend", "Resend Passive Command", es_control_dev,
                  icon="mdi:refresh", entity_category="config"))
+    add(HAEntity("number", "idle_soc_threshold", "Idle SOC Threshold", es_control_dev,
+                 unit_of_measurement="%", icon="mdi:battery-alert", min_value=0, max_value=100, step=1))
+    add(HAEntity("binary_sensor", "passive_idle_low_soc", "Passive Idle (Low SOC)", es_control_dev,
+                 icon="mdi:battery-alert-variant-outline"))
 
     # ---------------------------------------------------------------- #
     # Marstek PV (PV.GetStatus, periodisch - NUR wenn status_polling.pv_enabled)
