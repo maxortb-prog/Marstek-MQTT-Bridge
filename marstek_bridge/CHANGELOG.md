@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1
+
+- **Bugfix: Docker-Build schlug fehl** (`ghcr.io/home-assistant/base:3.19: not found`).
+  Das in 0.2.0 gesetzte Tag `3.19` existiert fuer das neue, vereinheitlichte
+  Multi-Arch-Base-Image nicht mehr - die aktuellen Images werden nach
+  Alpine-Version getaggt (aktuell unterstuetzt: 3.22/3.23/3.24). Auf
+  Empfehlung der offiziellen HA-Entwickler-Doku auf `ghcr.io/home-assistant/base:latest`
+  umgestellt.
+
 ## 0.2.0
 
 - **Neue Option `es_mode_enabled`** (Gruppe "Scanrate for Statuscalls",

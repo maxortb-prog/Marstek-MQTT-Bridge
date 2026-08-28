@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM ghcr.io/home-assistant/base:3.19
+FROM ghcr.io/home-assistant/base:latest
 
 ARG BUILD_VERSION
 
