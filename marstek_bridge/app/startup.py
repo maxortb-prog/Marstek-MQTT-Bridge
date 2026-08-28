@@ -11,7 +11,12 @@ Fuehrt die Erstinitialisierungs-Sequenz gegen ein Marstek-Geraet aus:
     6. ES.GetMode          -> aktueller Betriebsmodus
     7. DOD.SET             -> konfigurierten Startwert setzen
     8. Ble.Adv             -> konfigurierten Startzustand setzen ("Ble_block")
-    9. Led.Ctrl            -> konfigurierten Startzustand setzen
+    9. Led.Ctrl             -> konfigurierten Startzustand setzen
+    10. PV.GetStatus (optional) -> NUR wenn status_polling.pv_enabled aktiv
+        ist. Laut API-Doku unterstuetzen nur Venus D/Venus A PV.GetStatus,
+        Venus C/E NICHT - deshalb per Konfiguration steuerbar statt fest
+        eingebaut, statt bei nicht unterstuetzenden Geraeten Fehler zu
+        produzieren.
 
 Jeder Schritt laeuft ueber client.send_init(), nutzt also die
 InitRetryPolicy (Basis-Timeout + Inkrement, mehrere Versuche). Zwischen den
@@ -56,6 +61,7 @@ class StartupResult:
     dod_set_result: bool
     ble_adv_set_result: bool
     led_set_result: bool
+    pv_status: Optional[dict] = None  # None, wenn PV nicht aktiviert ist
 
 
 async def run_startup_sequence(client: MarstekUDPClient, cfg: MarstekConfig) -> StartupResult:
@@ -119,8 +125,16 @@ async def run_startup_sequence(client: MarstekUDPClient, cfg: MarstekConfig) -> 
     logger.info("Init: Led.Ctrl state=%s", led_state)
     led_result = await client.send_init("Led.Ctrl", {"state": led_state})
 
-    logger.info("Init-Sequenz erfolgreich abgeschlossen (device_type=%s, ble_mac=%s)",
-                device_type, ble_mac)
+    # 10) PV.GetStatus (optional) ----------------------------------------------
+    pv_status: Optional[dict] = None
+    pv_enabled = bool(cfg.get("status_polling", "pv_enabled", default=False))
+    if pv_enabled:
+        await _pause()
+        logger.info("Init: PV.GetStatus")
+        pv_status = await client.send_init("PV.GetStatus", {"id": 0})
+
+    logger.info("Init-Sequenz erfolgreich abgeschlossen (device_type=%s, ble_mac=%s, pv_enabled=%s)",
+                device_type, ble_mac, pv_enabled)
 
     return StartupResult(
         device_type=device_type,
@@ -137,4 +151,5 @@ async def run_startup_sequence(client: MarstekUDPClient, cfg: MarstekConfig) -> 
         dod_set_result=bool(dod_result.get("set_result")),
         ble_adv_set_result=bool(ble_adv_result.get("set_result")),
         led_set_result=bool(led_result.get("set_result")),
+        pv_status=pv_status,
     )

@@ -57,3 +57,34 @@ def test_passive_number_ranges_come_from_config():
     assert power_entity.max_value == 600
     cd_entity = bundle.entities["passive_cd_time"]
     assert cd_entity.max_value == 1800
+
+
+def test_pv_entities_excluded_when_disabled():
+    cfg = MarstekConfig.from_dict({"status_polling": {"pv_enabled": False}})
+    bundle = build_entities(cfg, ble_mac="aabbcc", device_type="VenusD")
+    assert "pv1_power" not in bundle.entities
+    assert bundle.pv_device is None
+    assert bundle.field_map_pv == {}
+    assert bundle.field_map_pv_state == {}
+
+
+def test_pv_entities_included_when_enabled():
+    cfg = MarstekConfig.from_dict({"status_polling": {"pv_enabled": True}})
+    bundle = build_entities(cfg, ble_mac="aabbcc", device_type="VenusD")
+    assert bundle.pv_device is not None
+    assert bundle.pv_device.name == "Marstek PV"
+    for ch in (1, 2, 3, 4):
+        assert f"pv{ch}_power" in bundle.entities
+        assert f"pv{ch}_voltage" in bundle.entities
+        assert f"pv{ch}_current" in bundle.entities
+        assert f"pv{ch}_active" in bundle.entities
+    assert bundle.field_map_pv["pv1_power"] == "pv1_power"
+    assert bundle.field_map_pv_state["pv1_state"] == "pv1_active"
+    assert len(bundle.field_map_pv) == 12   # 4 Kanaele x 3 numerische Felder
+    assert len(bundle.field_map_pv_state) == 4
+
+
+def test_pv_device_chained_into_marstek_hub():
+    cfg = MarstekConfig.from_dict({"status_polling": {"pv_enabled": True}})
+    bundle = build_entities(cfg, ble_mac="aabbcc", device_type="VenusD")
+    assert bundle.pv_device.via_device == bundle.hub_device.identifiers[0]

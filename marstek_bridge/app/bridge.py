@@ -29,7 +29,7 @@ import time
 from typing import Optional
 
 from config import MarstekConfig
-from entities import EntityBundle, build_entities
+from entities import EntityBundle, build_entities, pv_object_ids_and_components
 from input_averager import InputAverager
 from mqtt_ha import HAEntity, HAMqttBridge
 from passive_controller import PassiveController, PassiveControllerConfig
@@ -115,6 +115,13 @@ class MarstekBridge:
         for entity in self.bundle.entities.values():
             await self.mqtt.register_entity(entity)
 
+        if not self.cfg.get("status_polling", "pv_enabled", default=False):
+            # PV ist deaktiviert -> ggf. zuvor registrierte PV-Entities aus HA
+            # entfernen (falls die Option frueher mal aktiv war). Idempotent
+            # und guenstig, auch wenn nie eine PV-Entity existiert hat.
+            for component, object_id in pv_object_ids_and_components():
+                await self.mqtt.remove_entity_discovery(component, object_id)
+
         ctrl_cfg = self.cfg.raw["controller"]
         pm_cfg = self.cfg.raw["passive_mode"]
         self.passive_ctrl = PassiveController(PassiveControllerConfig(
@@ -136,6 +143,25 @@ class MarstekBridge:
         self.passive_ctrl.set_discharge_cap(self._passive_power_cap)
         self.passive_ctrl.set_cd_time(self._passive_cd_time)
 
+        # Sollwert-Kontinuitaet ueber einen Neustart hinweg: den waehrend der
+        # Init-Sequenz ohnehin schon abgefragten aktuellen Geraetezustand
+        # (ES.GetMode.ongrid_power) als Startpunkt fuer die integrale Regelung
+        # uebernehmen, statt bei jedem Neustart faelschlich von 0W auszugehen.
+        # Sonst wuerde die erste automatische Korrektur nach einem Neustart
+        # einen grossen, ungewollten Sprung verursachen (z.B. Geraet laeuft
+        # bereits bei 261W, Regler nimmt faelschlich 0W an und springt sofort
+        # auf einen stark abweichenden Wert statt sanft anzupassen).
+        if isinstance(startup_result.es_mode, dict):
+            last_known_output = startup_result.es_mode.get("ongrid_power")
+            if last_known_output is not None:
+                self.passive_ctrl.state.committed_setpoint_w = float(last_known_output)
+                self.passive_ctrl.state.last_sent_setpoint_w = float(last_known_output)
+                logger.info(
+                    "Passive-Regler: Sollwert-Kontinuitaet nach (Neu-)Start - "
+                    "starte mit %.0fW (aus ES.GetMode.ongrid_power) statt 0W",
+                    last_known_output,
+                )
+
         shelly_cfg = self.cfg.raw["shelly"]
         self._shelly_debounce_time_s = float(shelly_cfg.get("debounce_time_s", 0.0))
         self.shelly_averager = InputAverager(window_s=self._shelly_debounce_time_s)
@@ -149,11 +175,22 @@ class MarstekBridge:
         self._poll_tasks = [
             asyncio.create_task(self._poll_loop("Bat.GetStatus", self._on_battery_status,
                                                  sp["bat_status_interval_s"])),
-            asyncio.create_task(self._poll_loop("ES.GetMode", self._on_es_mode,
-                                                 sp["es_mode_interval_s"])),
             asyncio.create_task(self._poll_loop("ES.GetStatus", self._on_es_status,
                                                  sp["es_status_interval_s"])),
         ]
+        if sp.get("es_mode_enabled", True):
+            self._poll_tasks.append(
+                asyncio.create_task(self._poll_loop("ES.GetMode", self._on_es_mode,
+                                                     sp["es_mode_interval_s"]))
+            )
+        else:
+            logger.info("Periodisches ES.GetMode-Polling ist deaktiviert (es_mode_enabled=false). "
+                        "Die Init-Sequenz fragt ES.GetMode weiterhin einmalig ab.")
+        if sp.get("pv_enabled", False):
+            self._poll_tasks.append(
+                asyncio.create_task(self._poll_loop("PV.GetStatus", self._on_pv_status,
+                                                     sp["pv_status_interval_s"]))
+            )
         self._countdown_task = asyncio.create_task(self._countdown_loop())
 
         shelly_topic = self.cfg.raw["shelly"]["power_topic"]
@@ -217,6 +254,9 @@ class MarstekBridge:
         await self._publish_mapped(r.battery_status, self.bundle.field_map_battery)
         await self._publish_mapped(r.es_status, self.bundle.field_map_es_status)
         await self._publish_mapped(r.es_mode, self.bundle.field_map_es_mode)
+        if r.pv_status is not None:
+            await self._publish_mapped(r.pv_status, self.bundle.field_map_pv)
+            await self._publish_pv_states(r.pv_status)
 
         await self.mqtt.publish_state(e["dod_value"], self.cfg.get("dod", "startup_value", default=88))
         await self.mqtt.publish_state(e["passive_default_power"],
@@ -235,6 +275,16 @@ class MarstekBridge:
         for field_name, object_id in field_map.items():
             if field_name in result and result[field_name] is not None:
                 await self.mqtt.publish_state(self.bundle.entities[object_id], result[field_name])
+
+    async def _publish_pv_states(self, result: dict) -> None:
+        """Die pvN_state-Felder (1=Work/0=Standby) werden als binary_sensor
+        abgebildet - brauchen daher eine explizite bool-Konvertierung statt
+        der generischen Zahlen-Weiterleitung in _publish_mapped."""
+        if not isinstance(result, dict) or not self.bundle.field_map_pv_state:
+            return
+        for field_name, object_id in self.bundle.field_map_pv_state.items():
+            if field_name in result and result[field_name] is not None:
+                await self.mqtt.publish_state(self.bundle.entities[object_id], bool(result[field_name]))
 
     # ------------------------------------------------------------------ #
     # Poll-Loops (Status-Abfragen, niedrige Prioritaet gegenueber Control)
@@ -271,6 +321,10 @@ class MarstekBridge:
 
     async def _on_es_mode(self, result: dict) -> None:
         await self._publish_mapped(result, self.bundle.field_map_es_mode)
+
+    async def _on_pv_status(self, result: dict) -> None:
+        await self._publish_mapped(result, self.bundle.field_map_pv)
+        await self._publish_pv_states(result)
 
     # ------------------------------------------------------------------ #
     # HA -> Bridge Kommandos

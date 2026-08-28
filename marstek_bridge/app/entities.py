@@ -34,14 +34,31 @@ class EntityBundle:
     energy_status_device: HADevice
     energy_mode_device: HADevice
     energy_control_device: HADevice
+    pv_device: "HADevice | None" = None
 
     # object_id -> HAEntity, fuer die Registrierung bei der Bridge
-    entities: dict
+    entities: dict = None
 
     # API-Feldname -> object_id, gruppiert nach API-Aufruf, fuer die Poll-Loops
-    field_map_battery: dict
-    field_map_es_status: dict
-    field_map_es_mode: dict
+    field_map_battery: dict = None
+    field_map_es_status: dict = None
+    field_map_es_mode: dict = None
+    field_map_pv: dict = None          # nur numerische Felder (power/voltage/current)
+    field_map_pv_state: dict = None    # die 4 pvN_state-Felder (-> binary_sensor)
+
+
+def pv_object_ids_and_components() -> list:
+    """Liste aller (component, object_id)-Paare der PV-Entities - UNABHAENGIG
+    davon, ob PV aktuell aktiviert ist. Wird von bridge.py auch benutzt, um
+    zuvor registrierte PV-Entities aus HA zu entfernen, wenn die Option
+    deaktiviert wird (siehe HAMqttBridge.remove_entity_discovery)."""
+    ids = []
+    for ch in (1, 2, 3, 4):
+        ids.append(("sensor", f"pv{ch}_power"))
+        ids.append(("sensor", f"pv{ch}_voltage"))
+        ids.append(("sensor", f"pv{ch}_current"))
+        ids.append(("binary_sensor", f"pv{ch}_active"))
+    return ids
 
 
 def build_entities(cfg: MarstekConfig, ble_mac: str, device_type: str) -> EntityBundle:
@@ -58,6 +75,8 @@ def build_entities(cfg: MarstekConfig, ble_mac: str, device_type: str) -> Entity
                             suggested_area=area, via_device=hub_id)
     es_control_dev = HADevice(identifiers=(f"{hub_id}_energy_control",), name="Marstek Energy Control",
                                suggested_area=area, via_device=hub_id)
+    pv_dev = HADevice(identifiers=(f"{hub_id}_pv",), name="Marstek PV",
+                       suggested_area=area, via_device=hub_id)
 
     entities: dict = {}
 
@@ -193,14 +212,47 @@ def build_entities(cfg: MarstekConfig, ble_mac: str, device_type: str) -> Entity
     add(HAEntity("button", "passive_resend", "Resend Passive Command", es_control_dev,
                  icon="mdi:refresh", entity_category="config"))
 
+    # ---------------------------------------------------------------- #
+    # Marstek PV (PV.GetStatus, periodisch - NUR wenn status_polling.pv_enabled)
+    # Laut API-Doku nur von Venus D/Venus A unterstuetzt, NICHT von Venus C/E -
+    # deshalb per Konfiguration abschaltbar statt fest eingebaut.
+    # ---------------------------------------------------------------- #
+    field_map_pv = {}
+    field_map_pv_state = {}
+    pv_enabled = bool(cfg.get("status_polling", "pv_enabled", default=False))
+
+    if pv_enabled:
+        for ch in (1, 2, 3, 4):
+            power_id = f"pv{ch}_power"
+            add(HAEntity("sensor", power_id, f"PV{ch} Power", pv_dev,
+                         unit_of_measurement="W", device_class="power", state_class="measurement"))
+            field_map_pv[power_id] = power_id
+
+            voltage_id = f"pv{ch}_voltage"
+            add(HAEntity("sensor", voltage_id, f"PV{ch} Voltage", pv_dev,
+                         unit_of_measurement="V", device_class="voltage", state_class="measurement"))
+            field_map_pv[voltage_id] = voltage_id
+
+            current_id = f"pv{ch}_current"
+            add(HAEntity("sensor", current_id, f"PV{ch} Current", pv_dev,
+                         unit_of_measurement="A", device_class="current", state_class="measurement"))
+            field_map_pv[current_id] = current_id
+
+            active_id = f"pv{ch}_active"
+            add(HAEntity("binary_sensor", active_id, f"PV{ch} Active", pv_dev))
+            field_map_pv_state[f"pv{ch}_state"] = active_id
+
     return EntityBundle(
         hub_device=hub,
         battery_device=battery_dev,
         energy_status_device=es_status_dev,
         energy_mode_device=es_mode_dev,
         energy_control_device=es_control_dev,
+        pv_device=pv_dev if pv_enabled else None,
         entities=entities,
         field_map_battery=field_map_battery,
         field_map_es_status=field_map_es_status,
         field_map_es_mode=field_map_es_mode,
+        field_map_pv=field_map_pv,
+        field_map_pv_state=field_map_pv_state,
     )

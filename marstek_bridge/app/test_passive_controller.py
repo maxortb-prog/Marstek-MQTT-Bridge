@@ -250,3 +250,61 @@ def test_no_keepalive_when_real_update_already_happening():
     cmd = ctrl.update(600, now=5.0)  # deutliche Aenderung, weit vor cd_time-Ablauf
     assert cmd is not None
     assert cmd["power"] == 600
+
+
+def test_discharge_cap_does_not_force_immediate_resend_when_unchanged():
+    """Kernanforderung: haengt der Sollwert dauerhaft am dynamischen
+    Entlade-Deckel (z.B. SOC-Automatisierung), darf das NICHT bei jedem
+    Zyklus ein erzwungenes Sofort-Senden ausloesen, solange sich der
+    tatsaechlich gesendete Wert nicht aendert. Totzone/Hold-off muessen
+    normal greifen."""
+    cfg = PassiveControllerConfig(deadzone_w=5, min_setpoint_change_w=5, max_step_w=2000,
+                                   min_output_w=-1500, max_output_w=800, min_send_interval_s=30)
+    ctrl = PassiveController(cfg)
+    ctrl.set_discharge_cap(200)  # aktiv reduzierter SOC-Deckel
+
+    # Initiale Sendung: Rohwert 300 wird auf den Deckel (200) geklemmt
+    cmd0 = ctrl.update(300, now=0.0)
+    assert cmd0 is not None and cmd0["power"] == 200
+
+    # Mehrere Folgezyklen mit unterschiedlichen Rohwerten, die aber alle
+    # ueber dem Deckel liegen -> geklemmter Wert bleibt immer 200 ->
+    # darf NICHT jedes Mal senden (kein Sicherheitsereignis mehr)
+    assert ctrl.update(254, now=5.0) is None
+    assert ctrl.update(275, now=10.0) is None
+    assert ctrl.update(271, now=15.0) is None
+    assert ctrl.update(262, now=20.0) is None
+
+
+def test_hard_output_limit_still_forces_immediate_send():
+    """Regressionstest: die ECHTEN harten Grenzen (min_output_w/max_output_w)
+    muessen weiterhin sofort senden (Sicherheitsverhalten bleibt erhalten),
+    nur der dynamische SOC-Deckel wurde davon ausgenommen."""
+    cfg = PassiveControllerConfig(deadzone_w=5, min_setpoint_change_w=5, max_step_w=2000,
+                                   min_output_w=-1500, max_output_w=800, min_send_interval_s=30)
+    ctrl = PassiveController(cfg)
+    ctrl.update(800, now=0.0)  # committed = 800 (am Limit)
+
+    # kurz danach (< min_send_interval_s) erneut ein Wert, der ueber die
+    # harte max_output_w-Grenze hinausschiesst -> muss trotz Hold-off senden
+    cmd = ctrl.update(5000, now=5.0)
+    assert cmd is not None, "Harte Sicherheitsgrenze haette trotz Hold-off senden muessen"
+    assert cmd["power"] == 800
+
+
+def test_discharge_cap_keepalive_still_works_while_capped():
+    """Auch waehrend der Sollwert dauerhaft am Deckel haengt, muss das
+    Keepalive kurz vor Ablauf von cd_time weiterhin senden."""
+    cfg = PassiveControllerConfig(deadzone_w=5, min_setpoint_change_w=5, max_step_w=2000,
+                                   min_output_w=-1500, max_output_w=800, min_send_interval_s=0,
+                                   default_cd_time_s=60, max_cd_time_s=3600)
+    ctrl = PassiveController(cfg)
+    ctrl.set_discharge_cap(200)
+
+    ctrl.update(300, now=0.0)  # -> gesendet: 200W
+    assert ctrl.update(275, now=10.0) is None  # weiterhin am Deckel, kein Senden
+
+    # kurz vor Ablauf von cd_time (Schwelle bei 60-max(5,12)=48s) -> Keepalive muss senden
+    cmd = ctrl.update(271, now=50.0)
+    assert cmd is not None
+    assert cmd["power"] == 200

@@ -170,7 +170,21 @@ class PassiveController:
 
         # 1) Sicherheits-Clamp (inkl. dynamischem Entlade-Deckel)
         clamped = max(cfg.min_output_w, min(effective_max, raw_target_w))
-        hit_safety_limit = clamped != raw_target_w
+
+        # hit_safety_limit bezieht sich BEWUSST NUR auf die harten,
+        # konfigurierten Grenzen (min_output_w/max_output_w) - NICHT auf den
+        # dynamischen Entlade-Deckel (siehe set_discharge_cap). Der Deckel
+        # begrenzt den gesendeten Wert zwar genauso, loest aber KEIN
+        # erzwungenes Sofort-Senden (unter Umgehung von Totzone/Hold-off)
+        # aus. Sonst wuerde ein aktiv reduzierter Deckel (z.B. SOC-abhaengig)
+        # bei jedem Zyklus faelschlich als Sicherheitsereignis behandelt und
+        # das Geraet unnoetig mit identischen Werten bombardieren, obwohl
+        # sich am tatsaechlich gesendeten Wert gar nichts aendert. Ein
+        # dauerhaft am Deckel haengender Sollwert faellt stattdessen normal
+        # in Totzone/Hold-off und wird nur noch ueber das Keepalive kurz vor
+        # Ablauf von cd_time erneut gesendet.
+        hard_clamped = max(cfg.min_output_w, min(cfg.max_output_w, raw_target_w))
+        hit_safety_limit = hard_clamped != raw_target_w
         keepalive_due = self._is_keepalive_due(now)
 
         # Erstinitialisierung

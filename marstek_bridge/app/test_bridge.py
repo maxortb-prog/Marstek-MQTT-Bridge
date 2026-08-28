@@ -548,3 +548,205 @@ async def test_integral_control_law_stabilizes_instead_of_runaway(tmp_path):
     finally:
         await bridge.stop()
         server.stop()
+
+
+@pytest.mark.asyncio
+async def test_es_mode_polling_can_be_disabled_but_init_still_calls_it(tmp_path):
+    """Kernanforderung: es_mode_enabled=False darf den periodischen
+    ES.GetMode-Poll abschalten, MUSS aber die Init-Sequenz unberuehrt
+    lassen (dort wird ES.GetMode immer genau einmal abgefragt)."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    cfg = _test_config(tmp_path, port, status_polling={
+        "bat_status_interval_s": 999999, "es_mode_interval_s": 0.3,
+        "es_status_interval_s": 999999, "es_mode_enabled": False,
+    })
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+        # Init-Sequenz muss ES.GetMode trotzdem genau einmal aufgerufen haben
+        init_es_mode_calls = [r for r in server.received if r["method"] == "ES.GetMode"]
+        assert len(init_es_mode_calls) == 1, "Init-Sequenz haette ES.GetMode genau 1x abfragen muessen"
+
+        # Poll-Zyklus laenger laufen lassen als das (sehr kurze) Intervall waere -
+        # es darf trotzdem kein weiterer ES.GetMode-Call dazukommen
+        await asyncio.sleep(1.0)
+        es_mode_calls_after = [r for r in server.received if r["method"] == "ES.GetMode"]
+        assert len(es_mode_calls_after) == 1, (
+            f"Periodisches ES.GetMode-Polling haette deaktiviert sein muessen, "
+            f"aber es kamen {len(es_mode_calls_after)} Aufrufe an"
+        )
+    finally:
+        await bridge.stop()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_es_mode_polling_enabled_by_default(tmp_path):
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    cfg = _test_config(tmp_path, port, status_polling={
+        "bat_status_interval_s": 999999, "es_mode_interval_s": 0.3, "es_status_interval_s": 999999,
+    })
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+        await asyncio.sleep(0.8)
+        es_mode_calls = [r for r in server.received if r["method"] == "ES.GetMode"]
+        # 1x Init + mind. 1x periodischer Poll (0.3s Intervall, 0.8s gewartet)
+        assert len(es_mode_calls) >= 2, "Standardmaessig sollte ES.GetMode periodisch gepollt werden"
+    finally:
+        await bridge.stop()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_pv_disabled_by_default_no_init_call_no_poll(tmp_path):
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    server.set_behavior("PV.GetStatus", MethodBehavior(
+        result={"pv1_power": 100, "pv1_voltage": 30, "pv1_current": 3, "pv1_state": 1}))
+    cfg = _test_config(tmp_path, port, status_polling={
+        "bat_status_interval_s": 999999, "es_mode_interval_s": 999999,
+        "es_status_interval_s": 999999, "pv_status_interval_s": 0.3,
+    })  # pv_enabled Default = False
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+        await asyncio.sleep(0.6)
+        pv_calls = [r for r in server.received if r["method"] == "PV.GetStatus"]
+        assert len(pv_calls) == 0, "PV.GetStatus haette bei deaktivierter Option nie aufgerufen werden duerfen"
+        assert "pv1_power" not in bridge.bundle.entities
+    finally:
+        await bridge.stop()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_pv_enabled_polls_and_publishes_and_converts_state_to_bool(tmp_path):
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    server.set_behavior("PV.GetStatus", MethodBehavior(
+        result={"pv1_power": 150, "pv1_voltage": 32, "pv1_current": 4.5, "pv1_state": 1,
+                "pv2_power": 0, "pv2_voltage": 0, "pv2_current": 0, "pv2_state": 0}))
+    cfg = _test_config(tmp_path, port, status_polling={
+        "bat_status_interval_s": 999999, "es_mode_interval_s": 999999,
+        "es_status_interval_s": 999999, "pv_status_interval_s": 0.3, "pv_enabled": True,
+    })
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+
+        # Init-Sequenz muss PV.GetStatus 1x abgefragt haben
+        init_pv_calls = [r for r in server.received if r["method"] == "PV.GetStatus"]
+        assert len(init_pv_calls) == 1
+
+        power_msgs = await _collect("Marstek-Bridge-Control/pv1_power/state", 1, timeout=2.0)
+        assert power_msgs and power_msgs[0][1] == "150"
+        active_msgs = await _collect("Marstek-Bridge-Control/pv1_active/state", 1, timeout=2.0)
+        assert active_msgs and active_msgs[0][1] == "ON"
+        inactive_msgs = await _collect("Marstek-Bridge-Control/pv2_active/state", 1, timeout=2.0)
+        assert inactive_msgs and inactive_msgs[0][1] == "OFF"
+
+        # periodisches Polling muss ebenfalls laufen
+        await asyncio.sleep(0.6)
+        later_pv_calls = [r for r in server.received if r["method"] == "PV.GetStatus"]
+        assert len(later_pv_calls) >= 2, "PV.GetStatus haette auch periodisch gepollt werden sollen"
+    finally:
+        await bridge.stop()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_pv_disabled_removes_previously_registered_entities(tmp_path):
+    """Wird PV deaktiviert (Default), muessen eventuell zuvor registrierte
+    PV-Discovery-Eintraege aktiv entfernt werden (leere retained Nachricht),
+    damit sie nicht mehr in HA auftauchen."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    cfg = _test_config(tmp_path, port)  # pv_enabled Default = False
+
+    bridge = MarstekBridge(cfg)
+    collector = asyncio.ensure_future(
+        _collect("homeassistant/sensor/marstek_50cf14640fac/pv1_power/config", 2, timeout=3.0)
+    )
+    await asyncio.sleep(0.2)  # evtl. retained Reste aus vorherigen Tests werden sofort zugestellt
+    try:
+        await bridge.start()
+        msgs = await collector
+        assert msgs[-1][1] == "", (
+            "Bei deaktiviertem PV sollte eine leere Discovery-Nachricht fuer pv1_power gesendet werden"
+        )
+    finally:
+        await bridge.stop()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_passive_controller_seeded_from_ongrid_power_after_restart(tmp_path):
+    """Kernanforderung: nach dem Start muss der Passive-Regler NICHT von
+    0W ausgehen, sondern vom tatsaechlichen aktuellen Geraetewert
+    (ES.GetMode.ongrid_power aus der Init-Sequenz) - sonst wuerde die
+    erste automatische Korrektur einen grossen, ungewollten Sprung
+    verursachen."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    server.set_behavior("ES.GetMode", MethodBehavior(
+        result={"mode": "Passive", "ongrid_power": 261, "offgrid_power": 0, "bat_soc": 33}))
+    cfg = _test_config(tmp_path, port)
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+        assert bridge.passive_ctrl.state.committed_setpoint_w == 261.0
+        assert bridge.passive_ctrl.state.last_sent_setpoint_w == 261.0
+    finally:
+        await bridge.stop()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_first_shelly_update_after_restart_uses_seeded_setpoint_not_zero(tmp_path):
+    """End-to-End-Beweis: die erste Shelly-getriebene Regelentscheidung nach
+    dem Start rechnet mit dem geseedeten Sollwert (261W), nicht mit 0W."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    server.set_behavior("ES.GetMode", MethodBehavior(
+        result={"mode": "Passive", "ongrid_power": 261, "offgrid_power": 0, "bat_soc": 33}))
+    cfg = _test_config(tmp_path, port, shelly={"power_topic": "shellies/em/power", "debounce_time_s": 0},
+                        controller={"deadzone_w": 1, "min_setpoint_change_w": 1, "max_step_w": 5000,
+                                    "min_output_w": -1500, "max_output_w": 800, "min_send_interval_s": 0},
+                        passive_mode={"power": 1500, "cd_time": 60, "max_cd_time": 3600})
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+        # kleine Abweichung vom Netzbezug -> Ziel = 261 + (-4.6) = 256.4 -> gerundet 256
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="shelly-sim-seed") as shelly:
+            await shelly.publish("shellies/em/power", "-4.6", qos=0)
+        await asyncio.sleep(0.3)
+
+        sent_power = bridge.passive_ctrl.state.last_sent_setpoint_w
+        assert sent_power == pytest.approx(256, abs=1), (
+            f"Erste Korrektur haette vom geseedeten 261W ausgehen sollen, nicht von 0W (war: {sent_power})"
+        )
+    finally:
+        await bridge.stop()
+        server.stop()

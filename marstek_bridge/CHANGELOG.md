@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.2.0
+
+- **Neue Option `es_mode_enabled`** (Gruppe "Scanrate for Statuscalls",
+  Standard: an): schaltet nur das periodische `ES.GetMode`-Polling ein/aus.
+  Die Init-Sequenz fragt `ES.GetMode` weiterhin immer genau einmal ab,
+  unabhaengig von dieser Option.
+- **`build.yaml`-Migration** (Reaktion auf Supervisor-Deprecation-Warnung):
+  `build.yaml` entfernt, Inhalt direkt ins `Dockerfile` verschoben (`FROM
+  ghcr.io/home-assistant/base:3.19` statt Multi-Arch-`build_from`-Mapping,
+  `LABEL`-Anweisungen statt separater `labels`-Sektion). `arch:`-Liste in
+  `config.yaml` bewusst unveraendert gelassen (32-Bit-Architekturen bleiben
+  vorerst unterstuetzt). Die verwandte `addon_config`→`app_config`-
+  Map-Type-Warnung wurde bewusst NICHT geaendert, da die aktuelle offizielle
+  HA-Doku `addon_config` weiterhin als gueltig dokumentiert und kein
+  `app_config`-Ersatzwert dokumentiert ist (vermutlich Teil eines noch
+  offenen HA-internen Migrations-Issues).
+- **PV.GetStatus erstmals implementiert.** Neue Geraete-Gruppe "Marstek PV"
+  mit 4 Kanaelen (pv1-pv4: Power/Voltage/Current als Sensor, State als
+  binary_sensor). Neue Optionen `pv_enabled` (Standard: aus, da laut API-Doku
+  nur Venus D/Venus A unterstuetzt werden, Venus C/E nicht) und
+  `pv_status_interval_s`. Im Unterschied zu `es_mode_enabled` betrifft
+  `pv_enabled` SOWOHL die Init-Sequenz ALS AUCH das periodische Polling -
+  bei deaktiviertem PV wird `PV.GetStatus` nirgends aufgerufen. Zusaetzlich:
+  wird PV deaktiviert, nachdem es zuvor aktiv war, werden die betroffenen
+  Entities aktiv aus Home Assistant entfernt (leere retained
+  Discovery-Nachricht) statt nur verwaist stehen zu bleiben. Neue Methode
+  `HAMqttBridge.remove_entity_discovery()` fuer diesen Zweck.
+- **Bugfix: Sollwert-Kontinuitaet des Passive-Reglers ueber einen Neustart
+  hinweg.** Bisher startete der interne Sollwert des automatischen Reglers
+  nach jedem Add-on-Neustart faelschlich bei 0W, obwohl das Geraet
+  tatsaechlich bereits auf einem ganz anderen Wert lief (in der Praxis
+  beobachtet und gemeldet: 261W). Das fuehrte beim ersten automatischen
+  Update nach dem Neustart zu einem grossen, ungewollten Sprung. Die Bridge
+  uebernimmt jetzt den waehrend der Init-Sequenz ohnehin bereits
+  abgefragten `ES.GetMode.ongrid_power`-Wert als Startpunkt fuer den
+  Regler-Sollwert.
+- **Bugfix: SOC-Deckel loeste unnoetige Dauer-Sendungen aus.** Haengt der
+  Sollwert dauerhaft am dynamischen Entlade-Deckel (`passive_power`, z.B.
+  aktiv per SOC-Automatisierung reduziert), wurde bisher bei JEDEM Zyklus
+  ein sofortiges Senden erzwungen (unter Umgehung von Totzone und
+  Hold-off) - selbst wenn sich am tatsaechlich gesendeten Wert gar nichts
+  aenderte. Ursache: der Deckel wurde intern wie eine echte, seltene
+  Sicherheitsgrenze behandelt. In der Praxis beobachtet und gemeldet:
+  identische 200W-Kommandos alle ~12-15s ueber Stunden hinweg. Der
+  dynamische Deckel loest jetzt kein erzwungenes Sofort-Senden mehr aus -
+  Totzone/Hold-off greifen normal, das Keepalive sendet weiterhin kurz vor
+  Ablauf von `cd_time`. Die harten Grenzen (`controller_min_output_w`/
+  `controller_max_output_w`) loesen weiterhin sofortiges Senden aus
+  (echtes Sicherheitsverhalten bleibt unveraendert).
+
 ## 0.1.0
 
 - **Kritischer Regelungsfix**: Die Berechnung des Zielwerts fuer den

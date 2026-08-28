@@ -39,7 +39,18 @@ DEFAULT_CONFIG: dict = {
     "status_polling": {
         "bat_status_interval_s": 3600,   # 60 min
         "es_mode_interval_s": 900,       # 15 min
+        "es_mode_enabled": True,         # periodisches ES.GetMode-Polling ein/aus.
+                                          # Betrifft NUR den Poll-Zyklus, NICHT die
+                                          # Init-Sequenz (dort bleibt ES.GetMode
+                                          # immer bestehen, siehe startup.py).
         "es_status_interval_s": 300,     # 5 min
+        "pv_enabled": False,             # PV.GetStatus ein/aus - betrifft SOWOHL
+                                          # Init-Sequenz als auch periodisches
+                                          # Polling (im Gegensatz zu es_mode_enabled).
+                                          # Default aus, da laut API-Doku nur
+                                          # Venus D/Venus A PV.GetStatus unterstuetzen,
+                                          # Venus C/E NICHT.
+        "pv_status_interval_s": 300,     # 5 min
     },
     # ── Passive-Mode Einstellungen (Startwerte; zur Laufzeit ueber die
     #    HA-Number-Entities passive_default_power/passive_cd_time aenderbar,

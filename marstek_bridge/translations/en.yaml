@@ -48,6 +48,15 @@ configuration:
       es_mode_interval_s:
         name: "Energy mode interval"
         description: "Seconds between ES.GetMode polls."
+      es_mode_enabled:
+        name: "Energy mode polling enabled"
+        description: "Turns the periodic ES.GetMode poll on/off. Does NOT affect the one-time ES.GetMode call during the startup init sequence, which always runs."
+      pv_enabled:
+        name: "PV status enabled"
+        description: "Enables PV.GetStatus - both during the startup init sequence AND periodic polling. Only Venus D/Venus A support PV.GetStatus per the API docs (Venus C/E do not) - keep disabled for unsupported devices. When disabled, any previously registered PV entities are actively removed from Home Assistant."
+      pv_status_interval_s:
+        name: "PV status interval"
+        description: "Seconds between PV.GetStatus polls (only relevant if PV status is enabled)."
       es_status_interval_s:
         name: "Energy status interval"
         description: "Seconds between ES.GetStatus polls."

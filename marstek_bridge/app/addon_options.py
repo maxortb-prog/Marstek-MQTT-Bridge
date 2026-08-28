@@ -84,7 +84,10 @@ def build_overrides(options: dict, *, mqtt_host_override: Optional[str] = None,
         "status_polling": {
             "bat_status_interval_s": int(scan.get("bat_status_interval_s", 3600)),
             "es_mode_interval_s": int(scan.get("es_mode_interval_s", 900)),
+            "es_mode_enabled": bool(scan.get("es_mode_enabled", True)),
             "es_status_interval_s": int(scan.get("es_status_interval_s", 300)),
+            "pv_enabled": bool(scan.get("pv_enabled", False)),
+            "pv_status_interval_s": int(scan.get("pv_status_interval_s", 300)),
         },
         "passive_mode": {
             "power": float(passive.get("power", 800)),

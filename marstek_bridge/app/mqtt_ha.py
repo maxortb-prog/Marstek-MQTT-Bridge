@@ -208,6 +208,17 @@ class HAMqttBridge:
         if initial_state is not None:
             await self.publish_state(entity, initial_state)
 
+    async def remove_entity_discovery(self, component: str, object_id: str) -> None:
+        """Entfernt eine zuvor per MQTT Discovery registrierte Entity aus HA:
+        veroeffentlicht eine leere, retained Nachricht auf ihrem Discovery-
+        Config-Topic - das ist der Standard-HA-Mechanismus, um eine per
+        MQTT Discovery erzeugte Entity wieder verschwinden zu lassen. Wird
+        z.B. genutzt, wenn eine optionale Entity-Gruppe (z.B. PV) per
+        Konfiguration deaktiviert wird, nachdem sie zuvor aktiv war."""
+        discovery_topic = f"{self._discovery_prefix}/{component}/{self._node_id}/{object_id}/config"
+        await self._client.publish(discovery_topic, "", qos=1, retain=True)
+        logger.debug("Discovery entfernt: %s", discovery_topic)
+
     async def subscribe_raw(
         self, topic: str, callback: Callable[[str, str], Union[None, Awaitable[None]]]
     ) -> None:

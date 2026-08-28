@@ -116,3 +116,55 @@ async def test_startup_raises_and_aborts_on_device_offline(tmp_path):
     finally:
         await client.close()
         server.stop()
+
+
+@pytest.mark.asyncio
+async def test_startup_skips_pv_status_when_disabled(tmp_path):
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_server_happy_path(server)
+    server.set_behavior("PV.GetStatus", MethodBehavior(result={"pv1_power": 100}))
+
+    config_path = tmp_path / "config.yaml"
+    cfg = _fast_init_config({"status_polling": {"pv_enabled": False}})
+    cfg.save(config_path)
+    cfg = MarstekConfig.load(config_path)
+
+    client = MarstekUDPClient("127.0.0.1", port,
+                               init_policy=InitRetryPolicy(base_timeout_s=0.2, timeout_increment_s=0.1, max_retries=2))
+    await client.connect()
+    try:
+        result = await run_startup_sequence(client, cfg)
+        assert result.pv_status is None
+        pv_calls = [r for r in server.received if r["method"] == "PV.GetStatus"]
+        assert len(pv_calls) == 0, "PV.GetStatus haette bei pv_enabled=False NICHT aufgerufen werden duerfen"
+    finally:
+        await client.close()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_startup_queries_pv_status_when_enabled(tmp_path):
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_server_happy_path(server)
+    server.set_behavior("PV.GetStatus", MethodBehavior(
+        result={"pv1_power": 120, "pv1_voltage": 30, "pv1_current": 4, "pv1_state": 1}))
+
+    config_path = tmp_path / "config.yaml"
+    cfg = _fast_init_config({"status_polling": {"pv_enabled": True}})
+    cfg.save(config_path)
+    cfg = MarstekConfig.load(config_path)
+
+    client = MarstekUDPClient("127.0.0.1", port,
+                               init_policy=InitRetryPolicy(base_timeout_s=0.2, timeout_increment_s=0.1, max_retries=2))
+    await client.connect()
+    try:
+        result = await run_startup_sequence(client, cfg)
+        assert result.pv_status is not None
+        assert result.pv_status["pv1_power"] == 120
+        pv_calls = [r for r in server.received if r["method"] == "PV.GetStatus"]
+        assert len(pv_calls) == 1
+    finally:
+        await client.close()
+        server.stop()

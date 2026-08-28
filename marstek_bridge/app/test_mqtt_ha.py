@@ -189,3 +189,27 @@ async def test_button_entity_no_state_topic_and_press_routes_to_callback():
         )
     finally:
         await bridge.close()
+
+
+@pytest.mark.asyncio
+async def test_remove_entity_discovery_publishes_empty_retained_payload():
+    hub = HADevice(identifiers=("marstek_hub",), name="Marstek PV")
+    entity = HAEntity(component="sensor", object_id="pv1_power", name="PV1 Power", device=hub)
+
+    bridge = HAMqttBridge(BROKER_HOST, BROKER_PORT, node_id="marstek_test6", base_topic="Marstek-Test6")
+    await bridge.connect()
+    try:
+        await bridge.register_entity(entity)
+        # sicherstellen, dass es vorher wirklich registriert war (retained config vorhanden)
+        pre_msgs = await _collect_messages("homeassistant/sensor/marstek_test6/pv1_power/config", 1, timeout=2.0)
+        assert pre_msgs
+
+        collector = asyncio.ensure_future(
+            _collect_messages("homeassistant/sensor/marstek_test6/pv1_power/config", 2, timeout=2.0)
+        )
+        await asyncio.sleep(0.2)  # retained alte Config wird dem neuen Subscriber sofort erneut zugestellt
+        await bridge.remove_entity_discovery("sensor", "pv1_power")
+        msgs = await collector
+        assert msgs[-1][1] == "", "Entfernen muss eine leere Nachricht auf den Discovery-Topic senden"
+    finally:
+        await bridge.close()

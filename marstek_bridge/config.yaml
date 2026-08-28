@@ -1,5 +1,5 @@
 name: "Marstek MQTT Bridge"
-version: "0.1.0"
+version: "0.2.0"
 slug: "marstek_bridge"
 description: >-
   Bruecke zwischen einem Marstek Energiespeicher (lokale UDP-API) und Home
@@ -32,7 +32,10 @@ options:
   scanrate_statuscalls:
     bat_status_interval_s: 3600
     es_mode_interval_s: 900
+    es_mode_enabled: true
     es_status_interval_s: 300
+    pv_enabled: false
+    pv_status_interval_s: 300
 
   passiv_mode_settings:
     power: 800
@@ -88,7 +91,10 @@ schema:
   scanrate_statuscalls:
     bat_status_interval_s: "int(60,86400)"
     es_mode_interval_s: "int(60,86400)"
+    es_mode_enabled: "bool"
     es_status_interval_s: "int(10,86400)"
+    pv_enabled: "bool"
+    pv_status_interval_s: "int(10,86400)"
 
   passiv_mode_settings:
     power: "int(0,1500)"

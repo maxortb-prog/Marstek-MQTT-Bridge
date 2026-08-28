@@ -56,13 +56,16 @@ waehrend der Init-Sequenz gerade erst frisch abgefragt.
 |---|---|---|
 | `bat_status_interval_s` | 3600 (60 min) | `Bat.GetStatus` |
 | `es_mode_interval_s` | 900 (15 min) | `ES.GetMode` |
+| `es_mode_enabled` | `true` | Schaltet das **periodische** ES.GetMode-Polling ein/aus. Betrifft NICHT die Init-Sequenz - dort wird ES.GetMode beim Start immer genau einmal abgefragt, unabhängig von dieser Option. |
+| `pv_enabled` | `false` | Aktiviert `PV.GetStatus` - sowohl in der Init-Sequenz **als auch** beim periodischen Polling (im Unterschied zu `es_mode_enabled`). Laut API-Doku unterstützen nur Venus D/Venus A `PV.GetStatus`, Venus C/E **nicht** - deshalb Standard aus. Bei Deaktivierung werden zuvor registrierte PV-Entities aktiv aus Home Assistant entfernt (leere Discovery-Nachricht), statt nur zu verwaisen. |
+| `pv_status_interval_s` | 300 (5 min) | Sekunden zwischen `PV.GetStatus`-Abfragen (nur relevant, wenn `pv_enabled` an ist). |
 | `es_status_interval_s` | 300 (5 min) | `ES.GetStatus` |
 
 ### Abschnitt "Passiv Mode Settings"
 
 | Option | Standard | Bedeutung |
 |---|---|---|
-| `power` | 800 | **Deckel** fuer die maximale Entlade-/Einspeiseleistung des automatischen Reglers und Sollwert beim manuellen Umschalten auf "Passive" im HA-Dropdown. Zur Laufzeit ueber die HA-Entity `number.passive_default_power` aenderbar (z.B. SOC-abhaengig per Automatisierung absenken, damit der Akku nicht zu schnell entladen wird). 0 ist gueltig und sperrt das Entladen im Passive-Mode vollstaendig. |
+| `power` | 800 | **Deckel** fuer die maximale Entlade-/Einspeiseleistung des automatischen Reglers und Sollwert beim manuellen Umschalten auf "Passive" im HA-Dropdown. Zur Laufzeit ueber die HA-Entity `number.passive_default_power` aenderbar (z.B. SOC-abhaengig per Automatisierung absenken, damit der Akku nicht zu schnell entladen wird). 0 ist gueltig und sperrt das Entladen im Passive-Mode vollstaendig. **Wichtig:** Haengt der Sollwert dauerhaft an diesem Deckel (z.B. weil er per SOC-Automatisierung stark reduziert wurde), sendet die Bridge NICHT bei jedem Zyklus erneut - Totzone/Hold-off greifen normal, nur das Keepalive sendet noch kurz vor Ablauf von `cd_time` erneut. Nur die harten Grenzen (`controller_min_output_w`/`controller_max_output_w`) loesen weiterhin ein sofortiges Senden aus. |
 | `cd_time` | 60 | Nachlaufzeit/Countdown (Sekunden), die mit jedem Passive-Kommando mitgesendet wird. Ebenfalls live ueber `number.passive_cd_time` aenderbar. |
 | `max_cd_time` | 3600 | Obergrenze fuer `cd_time` (Geraetevorgabe: max. 3600s = 60 min) |
 
@@ -91,6 +94,17 @@ interpretiert würde - ein Aufschaukeln statt einer Stabilisierung. Mit der
 integrierenden Regelung konvergiert der Sollwert stattdessen bei
 konstanter Last in einem Schritt exakt auf den Wert, der den Netzbezug auf
 null bringt.
+
+**Sollwert-Kontinuität über einen Neustart hinweg:** Da die integrierende
+Regelung auf dem *zuletzt gültigen Sollwert* aufbaut, würde ein Add-on-
+Neustart ohne Weiteres fälschlich mit 0W starten - obwohl das Gerät
+tatsächlich schon auf einem ganz anderen Wert läuft (z. B. 261W). Das
+würde beim ersten automatischen Update nach dem Neustart einen großen,
+ungewollten Sprung verursachen. Um das zu vermeiden, übernimmt die Bridge
+beim Start automatisch den zu diesem Zeitpunkt ohnehin bereits
+abgefragten `ES.GetMode.ongrid_power`-Wert als Startpunkt für den Regler -
+die erste automatische Korrektur nach einem Neustart baut also auf dem
+tatsächlichen Gerätezustand auf, nicht auf einer Annahme von 0W.
 
 | Option | Standard | Bedeutung |
 |---|---|---|
@@ -183,7 +197,9 @@ aktiviert ist, sonst aus).
 
 Nach dem ersten erfolgreichen Start erscheinen automatisch mehrere Geraete:
 **Marstek System**, **Marstek Battery**, **Marstek Energy Status**,
-**Marstek Energy Mode**, **Marstek Energy Control**.
+**Marstek Energy Mode**, **Marstek Energy Control**. Bei aktiviertem
+`pv_enabled` kommt zusätzlich **Marstek PV** dazu (4 Kanäle `pv1`-`pv4`,
+jeweils Power/Voltage/Current als Sensor und ein "Active"-`binary_sensor`).
 
 Wichtige Status-Entities fuer Automatisierungen:
 
