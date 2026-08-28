@@ -132,7 +132,7 @@ tatsächlichen Gerätezustand auf, nicht auf einer Annahme von 0W.
 | `base_timeout_s` | 2.0 | Timeout des ersten Versuchs waehrend der Erstinitialisierung |
 | `timeout_increment_s` | 10.0 | Steigerung des Timeouts pro weiterem Versuch |
 | `max_retries` | 4 | Max. Wiederholungen waehrend der Init-Sequenz, danach `communication_fail` |
-| `inter_command_delay_s` | 10.0 | Pause zwischen den einzelnen Init-Kommandos (`Marstek.GetDevice`, `Wifi.GetStatus`, ..., `Led.Ctrl`), damit das Geraet beim Start nicht mit neun Anfragen praktisch gleichzeitig belastet wird |
+| `inter_command_delay_s` | 10.0 | Pause zwischen den einzelnen Init-Kommandos (`Marstek.GetDevice`, `Wifi.GetStatus`, ..., `Led.Ctrl`), damit das Geraet beim Start nicht mit neun Anfragen praktisch gleichzeitig belastet wird. Ist **unabhaengig** von `message_settings.min_inter_message_delay_s` - letzteres gilt ausschliesslich fuer den laufenden Poll-/Control-Betrieb nach der Initialisierung, nicht waehrend der Init-Sequenz. |
 
 ### Abschnitt "DOD (Depth of Discharge)"
 

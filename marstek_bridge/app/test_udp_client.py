@@ -268,3 +268,93 @@ async def test_min_inter_message_delay_zero_disables_pacing():
     finally:
         await client.close()
         server.stop()
+
+
+@pytest.mark.asyncio
+async def test_init_commands_bypass_runtime_pacing_gate():
+    """Kernanforderung (in der Praxis beobachtet und gemeldet): Init-Kommandos
+    duerfen NICHT vom Laufzeit-Pacing-Gate (min_inter_message_delay_s)
+    ausgebremst werden, da sie bereits ihre eigene Pause
+    (init.inter_command_delay_s, gehandhabt in startup.py) haben. Sonst
+    ueberlagern sich beide Mechanismen und die Init-Sequenz wird
+    unbeabsichtigt langsamer als konfiguriert."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    server.set_behavior("Marstek.GetDevice", MethodBehavior(result={"device": "VenusA", "ble_mac": "aabbcc"}))
+    server.set_behavior("Wifi.GetStatus", MethodBehavior(result={"ssid": "test"}))
+
+    client = MarstekUDPClient(
+        "127.0.0.1", port,
+        init_policy=InitRetryPolicy(base_timeout_s=1.0, timeout_increment_s=1.0, max_retries=1),
+        min_inter_message_delay_s=5.0,  # bewusst gross, wie im gemeldeten Fall
+    )
+    await client.connect()
+    try:
+        t0 = time.monotonic()
+        await client.send_init("Marstek.GetDevice", {"ble_mac": "0"})
+        await client.send_init("Wifi.GetStatus", {"id": 0})
+        elapsed = time.monotonic() - t0
+        assert elapsed < 1.0, (
+            f"Zwei aufeinanderfolgende Init-Kommandos duerfen NICHT durch das "
+            f"5s-Laufzeit-Pacing-Gate ausgebremst werden, dauerte aber {elapsed:.2f}s"
+        )
+    finally:
+        await client.close()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_runtime_status_still_respects_pacing_gate_after_fix():
+    """Regressionstest: normale Laufzeit-STATUS-Abfragen muessen weiterhin
+    korrekt gepaced werden - nur Init-Kommandos sind ausgenommen."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    server.set_behavior("Bat.GetStatus", MethodBehavior(result={"soc": 90}))
+    server.set_behavior("ES.GetMode", MethodBehavior(result={"mode": "Auto"}))
+
+    client = MarstekUDPClient(
+        "127.0.0.1", port,
+        runtime_policy=RuntimeRetryPolicy(timeout_s=1.0, max_retries=1),
+        min_inter_message_delay_s=0.5,
+    )
+    await client.connect()
+    try:
+        t0 = time.monotonic()
+        task1 = asyncio.ensure_future(client.send_status("Bat.GetStatus", {"id": 0}))
+        task2 = asyncio.ensure_future(client.send_status("ES.GetMode", {"id": 0}))
+        await task1
+        await task2
+        elapsed = time.monotonic() - t0
+        assert elapsed >= 0.5, f"Laufzeit-STATUS-Pacing haette weiterhin greifen muessen, dauerte nur {elapsed:.2f}s"
+    finally:
+        await client.close()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_control_still_preempts_status_after_fix():
+    """Regressionstest: Control-Preemption (unabhaengig vom Pacing-Gate)
+    muss nach dem Fix weiterhin funktionieren."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    server.set_behavior("Bat.GetStatus", MethodBehavior(result={"soc": 90}))
+    server.set_behavior("ES.SetMode", MethodBehavior(result={"set_result": True}))
+
+    client = MarstekUDPClient(
+        "127.0.0.1", port,
+        runtime_policy=RuntimeRetryPolicy(timeout_s=1.0, max_retries=1),
+        min_inter_message_delay_s=5.0,
+    )
+    await client.connect()
+    try:
+        t0 = time.monotonic()
+        await client.send_status("Bat.GetStatus", {"id": 0})
+        control_result = await client.send_control(
+            "ES.SetMode", {"id": 0, "config": {"mode": "Auto", "auto_cfg": {"enable": 1}}}
+        )
+        elapsed = time.monotonic() - t0
+        assert control_result["set_result"] is True
+        assert elapsed < 1.0, f"Control haette trotz Pacing-Gate sofort senden muessen ({elapsed:.2f}s)"
+    finally:
+        await client.close()
+        server.stop()

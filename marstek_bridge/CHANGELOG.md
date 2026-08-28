@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.3
+
+- **Bugfix: Init-Sequenz faelschlich vom Laufzeit-Pacing-Gate ausgebremst.**
+  Init-Kommandos liefen intern unter derselben Kategorie wie normale
+  Laufzeit-Status-Abfragen und wurden dadurch zusaetzlich zur eigenen
+  Init-Pause (`init.inter_command_delay_s`) auch noch vom
+  `message_settings.min_inter_message_delay_s`-Pacing-Gate ausgebremst -
+  der jeweils groessere Wert gewann unbeabsichtigt. In der Praxis
+  beobachtet und gemeldet: bei `inter_command_delay_s=2.0` und
+  `min_inter_message_delay_s=5.0` betrug der tatsaechliche Abstand
+  zwischen Init-Kommandos durchgaengig 5s statt der konfigurierten 2s.
+  Init-Kommandos umgehen das Laufzeit-Pacing-Gate jetzt vollstaendig -
+  nur die eigene, dedizierte Init-Pause gilt noch. Laufzeit-Pacing und
+  Control-Preemption bleiben fuer den normalen Poll-/Control-Betrieb
+  unveraendert.
+
 ## 0.2.2
 
 - **Config-Umgliederung + neue Default-Werte** in `config.yaml`: Feldreihenfolge

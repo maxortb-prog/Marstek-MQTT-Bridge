@@ -134,7 +134,7 @@ configuration:
         description: "Maximum retries during the init sequence."
       inter_command_delay_s:
         name: "Delay between init commands"
-        description: "Pause between the individual startup commands (Marstek.GetDevice, Wifi.GetStatus, ..., Led.Ctrl), so the device isn't hit with many requests at once."
+        description: "Pause between the individual startup commands (Marstek.GetDevice, Wifi.GetStatus, ..., Led.Ctrl), so the device isn't hit with many requests at once. Independent of message_settings.min_inter_message_delay_s, which does not apply during initialization."
 
   dod_settings:
     name: "DOD (Depth of Discharge)"

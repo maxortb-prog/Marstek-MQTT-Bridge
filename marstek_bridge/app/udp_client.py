@@ -300,11 +300,22 @@ class MarstekUDPClient:
             if not self._control_queue.empty():
                 return self._control_queue.get_nowait()
             if not self._status_queue.empty():
+                item = self._status_queue.get_nowait()
+                if item.is_init:
+                    # Init-Kommandos haben ihre EIGENE Pause (siehe
+                    # init.inter_command_delay_s in startup.py) und duerfen
+                    # NICHT zusaetzlich vom Laufzeit-Pacing-Gate
+                    # (min_inter_message_delay_s) ausgebremst werden - sonst
+                    # ueberlagern sich beide Mechanismen und der groessere
+                    # Wert gewinnt unbeabsichtigt.
+                    return item
                 if await self._wait_out_pacing_gap():
                     # Waehrend des Wartens ist ein Control-Kommando aufgetaucht ->
-                    # von vorne pruefen, Control geht vor.
+                    # das entnommene Status-Item zurueck einreihen und von
+                    # vorne pruefen, Control geht vor.
+                    await self._status_queue.put(item)
                     continue
-                return self._status_queue.get_nowait()
+                return item
             await asyncio.sleep(self._poll_interval_s)
 
     async def _wait_out_pacing_gap(self) -> bool:
