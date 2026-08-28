@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.2
+
+- **Config-Umgliederung + neue Default-Werte** in `config.yaml`: Feldreihenfolge
+  in "Scanrate for Statuscalls" angepasst (bat_status_interval_s,
+  es_status_interval_s, pv_enabled, pv_status_interval_s, es_mode_enabled,
+  es_mode_interval_s), sowie die vorbelegten Default-Werte fuer neue
+  Installationen ueberarbeitet (u.a. schnellere Poll-/Regel-Intervalle,
+  engere Totzone). Betrifft nur die Vorbelegung in der Add-on-UI - bestehende
+  Installationen mit bereits gesetzten Werten sind davon nicht betroffen.
+  Reine Konfigurationsaenderung, keine Code-/Verhaltensaenderung.
+
 ## 0.2.1
 
 - **Bugfix: Docker-Build schlug fehl** (`ghcr.io/home-assistant/base:3.19: not found`).
