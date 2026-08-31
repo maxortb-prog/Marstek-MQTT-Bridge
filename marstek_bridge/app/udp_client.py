@@ -414,7 +414,22 @@ class MarstekUDPClient:
                 self._pending.pop(req_id, None)
 
         # Alle Versuche ausgeschoepft
-        self._on_failure(item, last_error)
+        skip_escalation = (not item.is_init) and policy.max_retries == 0
+        if skip_escalation:
+            # max_retry=0 im laufenden Betrieb bedeutet bewusst: nur 1
+            # Versuch, aber ein einzelner fehlender Response wird NICHT als
+            # Verbindungsproblem gewertet - kein Communication-Fail-Status,
+            # kein Watchdog. Das einzelne Kommando scheitert nur fuer sich
+            # selbst (Exception an den Aufrufer). Betrifft NICHT die
+            # Init-Sequenz, die unabhaengig von dieser Einstellung immer
+            # eskaliert.
+            logger.debug(
+                "%s [%s] fehlgeschlagen nach 1 Versuch (max_retry=0) - kein "
+                "Communication-Fail/Watchdog ausgeloest",
+                category_label.value, item.method, extra={"category": category_label},
+            )
+        else:
+            self._on_failure(item, last_error)
         if not item.future.done():
             item.future.set_exception(last_error or MarstekCommunicationError("unbekannter Fehler"))
 

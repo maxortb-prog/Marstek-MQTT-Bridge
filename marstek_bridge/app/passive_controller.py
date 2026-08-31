@@ -136,17 +136,17 @@ class PassiveController:
         return min(int(raw), self.config.max_cd_time_s)
 
     def _is_keepalive_due(self, now: float) -> bool:
-        """True, wenn kurz vor Ablauf der geraeteseitigen cd_time erneut
-        gesendet werden muss, OBWOHL Totzone/Mindeständerung eigentlich
-        kein Update verlangen wuerden. Sonst wuerde das Geraet nach Ablauf
-        von cd_time keinen aktiven Passive-Sollwert mehr haben (siehe API-
-        Doku: cd_time ist ein Countdown, nach dessen Ablauf ohne neues
-        Kommando das Geraet den Passive-Sollwert nicht mehr haelt)."""
+        """True, wenn seit der letzten Sendung bereits die Haelfte der
+        geraeteseitigen cd_time verstrichen ist - dann wird erneut gesendet,
+        OBWOHL Totzone/Mindeständerung eigentlich kein Update verlangen
+        wuerden. Sonst wuerde das Geraet nach Ablauf von cd_time keinen
+        aktiven Passive-Sollwert mehr haben (siehe API-Doku: cd_time ist
+        ein Countdown, nach dessen Ablauf ohne neues Kommando das Geraet
+        den Passive-Sollwert nicht mehr haelt)."""
         if self.state.last_send_monotonic is None:
             return False
         cd_time = self._effective_cd_time_s()
-        margin = max(5.0, cd_time * 0.2)  # 20%, mind. 5s Sicherheitsabstand
-        return (now - self.state.last_send_monotonic) >= (cd_time - margin)
+        return (now - self.state.last_send_monotonic) >= (cd_time / 2)
 
     def update(self, raw_target_w: float, *, now: Optional[float] = None) -> Optional[PassiveCommand]:
         """

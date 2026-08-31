@@ -112,9 +112,6 @@ DEFAULT_CONFIG: dict = {
     },
     "shelly": {
         "power_topic": "",  # z.B. "shellies/shellyem/emeter/0/power" - leer = deaktiviert
-        "debounce_time_s": 10.0,  # Mittelungsfenster zur Entprellung des rohen
-                                  # Eingangssignals, BEVOR es in die Regellogik
-                                  # (passive_controller.py) einfliesst. 0 = aus.
     },
 }
 
@@ -207,9 +204,6 @@ class MarstekConfig:
                 "und bedeutet: Entladen im Passive-Mode vollstaendig sperren)"
             )
 
-        shelly = self._data["shelly"]
-        if not (0 <= float(shelly.get("debounce_time_s", 0)) <= 300):
-            raise ConfigError("shelly.debounce_time_s muss zwischen 0 und 300 liegen")
 
         dod = self._data["dod"]["startup_value"]
         if not (30 <= int(dod) <= 88):

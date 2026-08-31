@@ -336,76 +336,6 @@ async def test_manual_passive_select_uses_live_power_not_static_config(tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_shelly_debounce_smooths_noisy_readings(tmp_path):
-    """Kernanforderung: mehrere kurz aufeinanderfolgende Shelly-Werte werden
-    ueber das konfigurierte Entprell-Fenster gemittelt, bevor sie in die
-    Regellogik einfliessen - ein einzelner Ausreisser darf nicht direkt
-    durchschlagen."""
-    server = FakeMarstekServer()
-    port = await server.start()
-    _setup_full_server_behavior(server)
-    cfg = _test_config(tmp_path, port, shelly={
-        "power_topic": "shellies/em/power", "debounce_time_s": 30,
-    }, passive_mode={"power": 1500, "cd_time": 60, "max_cd_time": 3600})
-
-    bridge = MarstekBridge(cfg)
-    await asyncio.sleep(0.1)
-    try:
-        await bridge.start()
-        assert bridge.shelly_averager.window_s == 30
-
-        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="shelly-sim-debounce") as shelly:
-            await shelly.publish("shellies/em/power", "-100", qos=0)
-            await asyncio.sleep(0.05)
-            await shelly.publish("shellies/em/power", "-100", qos=0)
-            await asyncio.sleep(0.05)
-            # kurzer Ausreisser
-            await shelly.publish("shellies/em/power", "-2000", qos=0)
-        await asyncio.sleep(0.4)
-
-        passive_calls = [r for r in server.received
-                          if r["method"] == "ES.SetMode" and r["params"]["config"]["mode"] == "Passive"]
-        assert passive_calls, "Passive-Regler haette senden muessen"
-        last_power = passive_calls[-1]["params"]["config"]["passive_cfg"]["power"]
-        # Ohne Entprellung wuerde die 3. Nachricht (Rohwert -2000, integral
-        # auf den Sollwert von -200 aufaddiert) auf -2200 -> geklemmt auf
-        # -1500 (min_output_w) fuehren. Mit 30s-Fenster wird stattdessen der
-        # gemittelte Wert (-100,-100,-2000)/3=-733.3 verwendet: -200 + (-733.3)
-        # = -933.3 -> deutlich weniger extrem als die geklemmte Grenze.
-        assert last_power != -1500, "Entprellung haette den Ausreisser abfedern sollen (nicht bis ans Limit)"
-        assert -960 <= last_power <= -900, f"unerwarteter gemittelter Wert: {last_power}"
-    finally:
-        await bridge.stop()
-        server.stop()
-
-
-@pytest.mark.asyncio
-async def test_shelly_debounce_time_live_adjustable_via_ha(tmp_path):
-    server = FakeMarstekServer()
-    port = await server.start()
-    _setup_full_server_behavior(server)
-    cfg = _test_config(tmp_path, port, shelly={
-        "power_topic": "shellies/em/power", "debounce_time_s": 30,
-    })
-
-    bridge = MarstekBridge(cfg)
-    await asyncio.sleep(0.1)
-    try:
-        await bridge.start()
-        assert bridge.shelly_averager.window_s == 30
-
-        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="ha-sim-debounce") as ha:
-            await ha.publish("Marstek-Bridge-Control/shelly_debounce_time_s/set", "5", qos=1)
-        await asyncio.sleep(0.2)
-
-        assert bridge.shelly_averager.window_s == 5
-        assert bridge._shelly_debounce_time_s == 5.0
-    finally:
-        await bridge.stop()
-        server.stop()
-
-
-@pytest.mark.asyncio
 async def test_selecting_passive_via_ha_auto_enables_control_logic_debug(tmp_path):
     """End-to-End: manuelles Umschalten auf Passive ueber HA muss den
     ControlLogic-Logger automatisch auf DEBUG stellen, damit sichtbar wird,
@@ -444,7 +374,7 @@ async def test_selecting_passive_via_ha_auto_enables_control_logic_debug(tmp_pat
         await asyncio.sleep(0.3)
 
         messages = [r.getMessage() for r in captured_records]
-        assert any("Shelly-Eingang (roh)" in m for m in messages), (
+        assert any("Shelly-Eingang" in m for m in messages), (
             "Shelly-Rohwert haette als ControlLogic-Debug-Zeile auftauchen muessen"
         )
     finally:
@@ -511,7 +441,7 @@ async def test_integral_control_law_stabilizes_instead_of_runaway(tmp_path):
     server = FakeMarstekServer()
     port = await server.start()
     _setup_full_server_behavior(server)
-    cfg = _test_config(tmp_path, port, shelly={"power_topic": "shellies/em/power", "debounce_time_s": 0},
+    cfg = _test_config(tmp_path, port, shelly={"power_topic": "shellies/em/power"},
                         controller={"deadzone_w": 1, "min_setpoint_change_w": 1, "max_step_w": 5000,
                                     "min_output_w": -1500, "max_output_w": 800, "min_send_interval_s": 0},
                         passive_mode={"power": 1500, "cd_time": 60, "max_cd_time": 3600})
@@ -729,7 +659,7 @@ async def test_first_shelly_update_after_restart_uses_seeded_setpoint_not_zero(t
     _setup_full_server_behavior(server)
     server.set_behavior("ES.GetMode", MethodBehavior(
         result={"mode": "Passive", "ongrid_power": 261, "offgrid_power": 0, "bat_soc": 33}))
-    cfg = _test_config(tmp_path, port, shelly={"power_topic": "shellies/em/power", "debounce_time_s": 0},
+    cfg = _test_config(tmp_path, port, shelly={"power_topic": "shellies/em/power"},
                         controller={"deadzone_w": 1, "min_setpoint_change_w": 1, "max_step_w": 5000,
                                     "min_output_w": -1500, "max_output_w": 800, "min_send_interval_s": 0},
                         passive_mode={"power": 1500, "cd_time": 60, "max_cd_time": 3600})
@@ -761,7 +691,7 @@ async def test_low_soc_pauses_automatic_regulation_no_send(tmp_path):
     port = await server.start()
     _setup_full_server_behavior(server)
     server.set_behavior("Bat.GetStatus", MethodBehavior(result={"soc": 3}))  # < Schwelle
-    cfg = _test_config(tmp_path, port, shelly={"power_topic": "shellies/em/power", "debounce_time_s": 0},
+    cfg = _test_config(tmp_path, port, shelly={"power_topic": "shellies/em/power"},
                         controller={"deadzone_w": 1, "min_setpoint_change_w": 1, "max_step_w": 5000,
                                     "min_output_w": -1500, "max_output_w": 800, "min_send_interval_s": 0,
                                     "idle_soc_threshold": 5.0, "idle_soc_resume_margin": 3.0},
@@ -795,7 +725,7 @@ async def test_soc_recovery_resumes_regulation_with_hysteresis(tmp_path):
     port = await server.start()
     _setup_full_server_behavior(server)
     server.set_behavior("Bat.GetStatus", MethodBehavior(result={"soc": 3}))
-    cfg = _test_config(tmp_path, port, shelly={"power_topic": "shellies/em/power", "debounce_time_s": 0},
+    cfg = _test_config(tmp_path, port, shelly={"power_topic": "shellies/em/power"},
                         controller={"deadzone_w": 1, "min_setpoint_change_w": 1, "max_step_w": 5000,
                                     "min_output_w": -1500, "max_output_w": 800, "min_send_interval_s": 0,
                                     "idle_soc_threshold": 5.0, "idle_soc_resume_margin": 3.0},

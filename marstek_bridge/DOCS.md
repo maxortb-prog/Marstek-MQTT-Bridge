@@ -65,7 +65,7 @@ waehrend der Init-Sequenz gerade erst frisch abgefragt.
 
 | Option | Standard | Bedeutung |
 |---|---|---|
-| `power` | 800 | **Deckel** fuer die maximale Entlade-/Einspeiseleistung des automatischen Reglers und Sollwert beim manuellen Umschalten auf "Passive" im HA-Dropdown. Zur Laufzeit ueber die HA-Entity `number.passive_default_power` aenderbar (z.B. SOC-abhaengig per Automatisierung absenken, damit der Akku nicht zu schnell entladen wird). 0 ist gueltig und sperrt das Entladen im Passive-Mode vollstaendig. **Wichtig:** Haengt der Sollwert dauerhaft an diesem Deckel (z.B. weil er per SOC-Automatisierung stark reduziert wurde), sendet die Bridge NICHT bei jedem Zyklus erneut - Totzone/Hold-off greifen normal, nur das Keepalive sendet noch kurz vor Ablauf von `cd_time` erneut. Nur die harten Grenzen (`controller_min_output_w`/`controller_max_output_w`) loesen weiterhin ein sofortiges Senden aus. |
+| `power` | 800 | **Deckel** fuer die maximale Entlade-/Einspeiseleistung des automatischen Reglers und Sollwert beim manuellen Umschalten auf "Passive" im HA-Dropdown. Zur Laufzeit ueber die HA-Entity `number.passive_default_power` aenderbar (z.B. SOC-abhaengig per Automatisierung absenken, damit der Akku nicht zu schnell entladen wird). 0 ist gueltig und sperrt das Entladen im Passive-Mode vollstaendig. **Wichtig:** Haengt der Sollwert dauerhaft an diesem Deckel (z.B. weil er per SOC-Automatisierung stark reduziert wurde), sendet die Bridge NICHT bei jedem Zyklus erneut - Totzone/Hold-off greifen normal, nur das Keepalive sendet spaetestens nach der Haelfte von `cd_time` erneut. Nur die harten Grenzen (`controller_min_output_w`/`controller_max_output_w`) loesen weiterhin ein sofortiges Senden aus. |
 | `cd_time` | 60 | Nachlaufzeit/Countdown (Sekunden), die mit jedem Passive-Kommando mitgesendet wird. Ebenfalls live ueber `number.passive_cd_time` aenderbar. |
 | `max_cd_time` | 3600 | Obergrenze fuer `cd_time` (Geraetevorgabe: max. 3600s = 60 min) |
 
@@ -114,16 +114,16 @@ tatsächlichen Gerätezustand auf, nicht auf einer Annahme von 0W.
 | `min_output_w` | -1500 | Harte Ladegrenze (negativ = Laden). Vom `power`-Deckel NICHT beeinflussbar. |
 | `max_output_w` | 800 | Harte Einspeisegrenze - der Marstek koennte physisch mehr, das ist eine bewusste Zusatzbegrenzung. Der `power`-Deckel (siehe "Passiv Mode Settings") kann diese Grenze nur verschaerfen, nie ueberschreiten. |
 | `min_send_interval_s` | 30 | Mindestabstand zwischen zwei Sendungen, 0-60s (0 = kein Mindestabstand) |
-| `idle_soc_threshold` | 5.0 | SOC (%), unter dem die automatische Passive-Regelung komplett pausiert: es wird nichts mehr gesendet, die geräteseitige `cd_time` läuft natürlich ab, das Gerät fällt in Idle zurück. SOC-Quelle: der jeweils zuletzt aktualisierte Wert aus `Bat.GetStatus.soc` **oder** `ES.GetStatus.bat_soc` (unterschiedliche Poll-Intervalle möglich - "wer zuletzt aktualisiert, gewinnt"). Zur Laufzeit über `number.idle_soc_threshold` änderbar. |
+| `idle_soc_threshold` | 5.0 | SOC (%), unter dem die reguläre Passive-Regelung (Reaktion auf Netzbezug/-einspeisung) pausiert: statt dessen sendet ein Hintergrund-Task kontinuierlich alle `cd_time`/2 ein `Passive`-Kommando mit ~0W - das Gerät bleibt so im Passive-Modus verbunden, ohne zu laden/entladen. SOC-Quelle: der jeweils zuletzt aktualisierte Wert aus `Bat.GetStatus.soc` **oder** `ES.GetStatus.bat_soc` (unterschiedliche Poll-Intervalle möglich - "wer zuletzt aktualisiert, gewinnt"). Zur Laufzeit über `number.idle_soc_threshold` änderbar. |
 | `idle_soc_resume_margin` | 3.0 | Hysterese (%): die Regelung startet erst wieder, wenn der SOC `idle_soc_threshold + diesen Wert` erreicht - verhindert schnelles Pausieren/Wiederanspringen direkt an der Schwelle. |
 | `shelly_power_topic` | (leer) | MQTT-Topic einer externen Leistungsmessung (z.B. Shelly EM) **an der Netzeinspeisestelle** (siehe oben), treibt den automatischen Regler an. Leer = Regler deaktiviert, nur manuelle Passive-Steuerung ueber HA moeglich |
-| `shelly_debounce_time_s` | 10.0 | Mittelungsfenster (Sekunden, 0-300, 0 = deaktiviert) fuer den rohen Leistungswert, BEVOR er in die Regellogik einfliesst - glaettet kurze Ausreisser/Rauschen. Zur Laufzeit ueber `number.shelly_debounce_time_s` aenderbar; wird beim (erneuten) manuellen Wechsel in den Passive-Mode automatisch zurueckgesetzt (frische Mittelung, alte Samples verworfen). |
+
 
 ### Abschnitt "Message Settings"
 
 | Option | Standard | Bedeutung |
 |---|---|---|
-| `max_retry` | 3 | Max. Wiederholungen im laufenden Betrieb (0-10), danach `communication_fail` |
+| `max_retry` | 3 | Max. Wiederholungen im laufenden Betrieb (0-10). Bei `0` wird ein einzelner fehlender Response **nicht** als Verbindungsproblem gewertet - kein `communication_fail`, kein Watchdog-Ausloeser. Nur das jeweilige Kommando scheitert fuer sich selbst. Ab `1` eskaliert ein vollstaendig ausgeschoepfter Versuch weiterhin zu `communication_fail`. |
 | `timeout_s` | 1.0 | Timeout pro Versuch im laufenden Betrieb |
 | `min_inter_message_delay_s` | 2.0 | Mindestabstand zwischen zwei GESENDETEN Nachrichten, egal welcher Art (0-30s, 0 = deaktiviert). Verhindert, dass mehrere unabhaengige Status-Abfragen (Bat/ES.GetMode/ES.GetStatus) zufaellig praktisch gleichzeitig beim Geraet landen. **Control-Kommandos werden davon nie aufgehalten** - sie duerfen sich jederzeit sofort dazwischen einreihen, dieser Wert bremst ausschliesslich aufeinanderfolgende Status-Abfragen. |
 
@@ -221,7 +221,7 @@ Wichtige Control-Entities fuer den Passive-Mode:
   `sensor.battery_soc` koppeln: hoher SOC -> Deckel hoch (bis max.
   `max_output_w`), niedriger SOC -> Deckel absenken.
 - `number.passive_cd_time` - die Nachlaufzeit/Countdown fuer Passive-Kommandos.
-- `number.shelly_debounce_time_s` - Mittelungsfenster fuer die Entprellung des externen Leistungssignals.
+
 - `select.energy_mode` - Auto/AI/Passive/Ups (Manual wird bewusst nicht
   unterstuetzt).
 - `button.passive_resend` - **"Resend Passive Command"**: sendet das
@@ -256,8 +256,14 @@ aktiviert werden.
 - Die gruppierten Konfigurationsabschnitte setzen HA Supervisor >= 2025.10
   voraus. Auf aelteren Installationen ist das Rendering der Abschnitte
   nicht getestet.
-- Der Passive-Regler sendet jetzt automatisch ein "Keepalive"-Kommando
-  (unveraenderter Sollwert) kurz bevor die geraeteseitige `cd_time`
-  ablaeuft, damit der Passive-Sollwert nicht verloren geht, wenn sich
-  ueber laengere Zeit kein echtes Update ergibt. Dieses Verhalten ist
-  nicht abschaltbar.
+- Der Passive-Regler sendet automatisch ein "Keepalive"-Kommando
+  (unveraenderter Sollwert), sobald seit der letzten Sendung die Haelfte
+  der geraeteseitigen `cd_time` verstrichen ist - damit der Passive-Sollwert
+  nicht verloren geht, wenn sich ueber laengere Zeit kein echtes Update
+  ergibt. Dieses Verhalten ist nicht abschaltbar.
+- Waehrend einer SOC-Idle-Phase (siehe `idle_soc_threshold`) sendet ein
+  eigener Hintergrund-Task weiterhin periodisch (alle `cd_time`/2) ein
+  `Passive`-Kommando mit ~0W, statt einfach nichts mehr zu senden - so
+  bleibt der Passive-Modus/die Verbindung zum Geraet erhalten, ohne dass
+  ge- oder entladen wird. Der Task laeuft unabhaengig vom Shelly-
+  Nachrichtenfluss.

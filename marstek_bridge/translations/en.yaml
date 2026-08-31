@@ -33,7 +33,7 @@ configuration:
         description: "'debug' also colorizes control/status/init lines (yellow=control, cyan=status, magenta=init, red=connection) and shows [STATUS]/[CONTROL]/[INIT] tags as a fallback."
       debug_control_logic:
         name: "Debugging - ControlLogic"
-        description: "Separate, independently switchable debug log (own color: green) for the passive-mode control loop internals: raw Shelly input, debounced/averaged value, and the computed power change per cycle. Kept separate from the general log level because it can produce a high volume of log lines on frequent Shelly updates."
+        description: "Separate, independently switchable debug log (own color: green) for the passive-mode control loop internals: Shelly input value and the computed power change per cycle. Kept separate from the general log level because it can produce a high volume of log lines on frequent Shelly updates."
   mqtt_port:
     name: "MQTT port (override)"
     description: "Only needed if not using the Mosquitto add-on with service discovery. Leave empty for auto-detection."
@@ -106,9 +106,6 @@ configuration:
       shelly_power_topic:
         name: "External power measurement topic"
         description: "MQTT topic of an external power measurement (e.g. Shelly EM) driving the automatic controller. Leave empty to disable automatic regulation (manual Passive control via Home Assistant still works)."
-      shelly_debounce_time_s:
-        name: "Input debounce time"
-        description: "Moving-average window (seconds, 0-300, 0 = disabled) applied to the raw external power reading BEFORE it enters the control logic - smooths out short spikes/noise. Adjustable live via number.shelly_debounce_time_s, and reset whenever Passive mode is (re-)selected manually."
 
   message_settings:
     name: "Message Settings"
@@ -116,7 +113,7 @@ configuration:
     fields:
       max_retry:
         name: "Max retries"
-        description: "Maximum retries before the command is considered failed (Communication Fail), 0-10."
+        description: "Maximum retries before the command is considered failed, 0-10. Note: with 0, a single failed command is tolerated silently (fails for its own caller) and does NOT trigger Communication Fail or the watchdog - only values >= 1 escalate to a connection-level failure after all attempts are exhausted."
       timeout_s:
         name: "Timeout"
         description: "Timeout per attempt, in seconds."

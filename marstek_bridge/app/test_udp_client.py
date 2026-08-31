@@ -358,3 +358,92 @@ async def test_control_still_preempts_status_after_fix():
     finally:
         await client.close()
         server.stop()
+
+
+@pytest.mark.asyncio
+async def test_max_retry_zero_does_not_trigger_comm_fail_or_watchdog():
+    """Kernanforderung: max_retry=0 bedeutet 'nur 1 Versuch, aber ein
+    fehlender Response ist kein Verbindungsproblem' - kein
+    Communication-Fail, kein Watchdog. Das einzelne Kommando scheitert
+    trotzdem fuer sich (Exception an den Aufrufer)."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    server.set_behavior("ES.GetStatus", MethodBehavior(drop_first_n=999))  # nie antworten
+
+    watchdog_calls = []
+
+    async def watchdog():
+        watchdog_calls.append(1)
+
+    client = MarstekUDPClient(
+        "127.0.0.1", port,
+        runtime_policy=RuntimeRetryPolicy(timeout_s=0.1, max_retries=0),
+        on_comm_fail_watchdog=watchdog,
+    )
+    await client.connect()
+    try:
+        with pytest.raises(MarstekCommunicationError):
+            await client.send_status("ES.GetStatus", {"id": 0})
+        await asyncio.sleep(0.1)  # Zeit fuer einen evtl. (unerwuenschten) Watchdog-Task geben
+        assert client.comm_fail is False, "max_retry=0 haette keinen Communication-Fail-Status setzen duerfen"
+        assert client.comm_established is False or client.comm_established is True  # unveraendert, nicht geprueft
+        assert len(watchdog_calls) == 0, "max_retry=0 haette den Watchdog nicht ausloesen duerfen"
+    finally:
+        await client.close()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_max_retry_above_zero_still_triggers_comm_fail_and_watchdog():
+    """Regressionstest: max_retry > 0 muss weiterhin normal eskalieren,
+    wenn alle Versuche ausgeschoepft sind."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    server.set_behavior("ES.GetStatus", MethodBehavior(drop_first_n=999))
+
+    watchdog_calls = []
+
+    async def watchdog():
+        watchdog_calls.append(1)
+
+    client = MarstekUDPClient(
+        "127.0.0.1", port,
+        runtime_policy=RuntimeRetryPolicy(timeout_s=0.1, max_retries=1),
+        on_comm_fail_watchdog=watchdog,
+    )
+    await client.connect()
+    try:
+        with pytest.raises(MarstekCommunicationError):
+            await client.send_status("ES.GetStatus", {"id": 0})
+        await asyncio.sleep(0.05)
+        assert client.comm_fail is True
+        assert len(watchdog_calls) == 1
+    finally:
+        await client.close()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_max_retry_zero_recovers_normally_on_next_success():
+    """Nach einem toleriertem Fehlschlag (max_retry=0) muss ein
+    nachfolgender erfolgreicher Aufruf ganz normal funktionieren."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    server.set_behavior("ES.GetStatus", MethodBehavior(drop_first_n=1, result={"bat_soc": 50}))
+
+    client = MarstekUDPClient(
+        "127.0.0.1", port,
+        runtime_policy=RuntimeRetryPolicy(timeout_s=0.1, max_retries=0),
+    )
+    await client.connect()
+    try:
+        with pytest.raises(MarstekCommunicationError):
+            await client.send_status("ES.GetStatus", {"id": 0})
+        assert client.comm_fail is False
+
+        result = await client.send_status("ES.GetStatus", {"id": 0})
+        assert result["bat_soc"] == 50
+        assert client.comm_established is True
+    finally:
+        await client.close()
+        server.stop()

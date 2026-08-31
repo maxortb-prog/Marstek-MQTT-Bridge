@@ -120,7 +120,6 @@ def build_overrides(options: dict, *, mqtt_host_override: Optional[str] = None,
         "ble_block": {"startup_enable": int(extra.get("ble_block_startup_enable", 0))},
         "shelly": {
             "power_topic": ctrl.get("shelly_power_topic", "") or "",
-            "debounce_time_s": float(ctrl.get("shelly_debounce_time_s", 10.0)),
         },
     }
 

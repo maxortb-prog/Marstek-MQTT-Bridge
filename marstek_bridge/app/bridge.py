@@ -30,7 +30,6 @@ from typing import Optional
 
 from config import MarstekConfig
 from entities import EntityBundle, build_entities, pv_object_ids_and_components
-from input_averager import InputAverager
 from mqtt_ha import HAEntity, HAMqttBridge
 from passive_controller import PassiveController, PassiveControllerConfig
 from startup import run_startup_sequence
@@ -56,7 +55,6 @@ class MarstekBridge:
         self.mqtt: Optional[HAMqttBridge] = None
         self.bundle: Optional[EntityBundle] = None
         self.passive_ctrl: Optional[PassiveController] = None
-        self.shelly_averager: Optional[InputAverager] = None
         # Statisch konfigurierter Grundzustand des ControlLogic-Loggers
         # (aus logging_settings.debug_control_logic). Beim Verlassen des
         # Passive-Mode wird dahin zurueckgekehrt (siehe _handle_energy_mode).
@@ -64,6 +62,7 @@ class MarstekBridge:
 
         self._poll_tasks: list[asyncio.Task] = []
         self._countdown_task: Optional[asyncio.Task] = None
+        self._idle_keepalive_task: Optional[asyncio.Task] = None
         self._passive_cd_deadline: Optional[float] = None
         self._closing = False
 
@@ -173,10 +172,7 @@ class MarstekBridge:
         self._idle_soc_threshold = float(ctrl_cfg.get("idle_soc_threshold", 5.0))
         self._idle_soc_resume_margin = float(ctrl_cfg.get("idle_soc_resume_margin", 3.0))
         self._passive_idle_low_soc = False
-
-        shelly_cfg = self.cfg.raw["shelly"]
-        self._shelly_debounce_time_s = float(shelly_cfg.get("debounce_time_s", 0.0))
-        self.shelly_averager = InputAverager(window_s=self._shelly_debounce_time_s)
+        self._idle_keepalive_last_sent: Optional[float] = None
 
         await self._publish_startup_values(startup_result)
 
@@ -204,6 +200,7 @@ class MarstekBridge:
                                                      sp["pv_status_interval_s"]))
             )
         self._countdown_task = asyncio.create_task(self._countdown_loop())
+        self._idle_keepalive_task = asyncio.create_task(self._idle_keepalive_loop())
 
         shelly_topic = self.cfg.raw["shelly"]["power_topic"]
         if shelly_topic:
@@ -225,7 +222,9 @@ class MarstekBridge:
             t.cancel()
         if self._countdown_task:
             self._countdown_task.cancel()
-        for t in [*self._poll_tasks, self._countdown_task]:
+        if self._idle_keepalive_task:
+            self._idle_keepalive_task.cancel()
+        for t in [*self._poll_tasks, self._countdown_task, self._idle_keepalive_task]:
             if t is None:
                 continue
             try:
@@ -275,7 +274,6 @@ class MarstekBridge:
                                        self.cfg.get("passive_mode", "power", default=50))
         await self.mqtt.publish_state(e["passive_cd_time"],
                                        self.cfg.get("passive_mode", "cd_time", default=60))
-        await self.mqtt.publish_state(e["shelly_debounce_time_s"], self._shelly_debounce_time_s)
         await self.mqtt.publish_state(e["idle_soc_threshold"], self._idle_soc_threshold)
         await self.mqtt.publish_state(e["passive_idle_low_soc"], self._passive_idle_low_soc)
         ble_broadcast_on = int(self.cfg.get("ble_block", "startup_enable", default=0)) == 0
@@ -362,8 +360,6 @@ class MarstekBridge:
                 await self._handle_passive_power_cap(payload)
             elif entity.object_id == "passive_cd_time":
                 await self._handle_passive_cd_time(payload)
-            elif entity.object_id == "shelly_debounce_time_s":
-                await self._handle_shelly_debounce_time(payload)
             elif entity.object_id == "idle_soc_threshold":
                 await self._handle_idle_soc_threshold(payload)
             elif entity.object_id == "passive_resend":
@@ -394,17 +390,6 @@ class MarstekBridge:
         self._passive_cd_time = value
         self.passive_ctrl.set_cd_time(value)
         await self.mqtt.publish_state(self.bundle.entities["passive_cd_time"], value)
-
-    async def _handle_shelly_debounce_time(self, payload: str) -> None:
-        """Aendert das Mittelungsfenster fuer die Shelly-Entprellung live.
-        Wirkt sofort auf den naechsten eingehenden Messwert."""
-        value = float(payload)
-        if value < 0:
-            logger.warning("Negativer Wert fuer shelly_debounce_time_s (%s) ignoriert", payload)
-            return
-        self._shelly_debounce_time_s = value
-        self.shelly_averager.set_window(value)
-        await self.mqtt.publish_state(self.bundle.entities["shelly_debounce_time_s"], value)
 
     async def _handle_idle_soc_threshold(self, payload: str) -> None:
         """Aendert die SOC-Idle-Schwelle live. Wirkt sofort - ein bereits
@@ -490,11 +475,6 @@ class MarstekBridge:
             power = self._passive_power_cap
             cd_time = self._passive_cd_time
             config = {"mode": "Passive", "passive_cfg": {"power": int(power), "cd_time": int(cd_time)}}
-            # Entprellungs-Fenster bei jedem (erneuten) manuellen Wechsel in
-            # den Passive-Mode zuruecksetzen, damit alte Samples aus einer
-            # vorherigen Phase nicht die erste Mittelung verfaelschen.
-            if self.shelly_averager is not None:
-                self.shelly_averager.reset()
             self._enter_passive_mode()
         else:
             logger.warning("Unbekannter Energy-Mode '%s' ignoriert (Manual wird bewusst nicht unterstuetzt)", mode)
@@ -547,31 +527,29 @@ class MarstekBridge:
             logger.warning("Ungueltiger Leistungswert auf %s: %r", topic, payload)
             return
 
+        # Sofortige Idle-Pruefung bei jeder Shelly-Nachricht (fuer schnelle
+        # Reaktion), ZUSAETZLICH zum periodischen Hintergrund-Task
+        # (_idle_keepalive_loop), der auch ohne Shelly-Nachrichten laeuft.
         await self._update_idle_state()
         if self._passive_idle_low_soc:
+            # Waehrend SOC-Idle sendet der eigene Hintergrund-Task
+            # (_idle_keepalive_loop) periodisch ein Passive-Kommando bei
+            # ~0W - die normale Regelung ist hier bewusst ausgesetzt.
             ctrl_logger.debug(
-                "Passive-Regelung pausiert (SOC zu niedrig) - Shelly-Wert %.1f W ignoriert",
+                "Passive-Regelung pausiert (SOC zu niedrig) - Shelly-Wert %.1f W ignoriert "
+                "(Idle-Keepalive laeuft im Hintergrund)",
                 raw_power, extra={"category": "CONTROLLOGIC"},
             )
             return
 
-        ctrl_logger.debug("Shelly-Eingang (roh): %.1f W", raw_power,
+        ctrl_logger.debug("Shelly-Eingang: %.1f W", raw_power,
                            extra={"category": "CONTROLLOGIC"})
-
-        # Entprellung: gleitender Mittelwert ueber das konfigurierte Fenster,
-        # BEVOR der Wert in die Regellogik einfliesst.
-        smoothed_power = self.shelly_averager.add(raw_power)
-        ctrl_logger.debug(
-            "Shelly-Eingang (entprellt, Fenster=%.0fs, %d Samples): %.1f W",
-            self.shelly_averager.window_s, self.shelly_averager.sample_count(), smoothed_power,
-            extra={"category": "CONTROLLOGIC"},
-        )
 
         # Zielwert fuer den Marstek: INTEGRALE Regelung, nicht direkte
         # Zielwertvorgabe. Der Shelly misst den TATSAECHLICHEN Netzbezug
         # (positiv) bzw. die Einspeisung (negativ) AN DER MESSSTELLE -
         # inklusive dem, was der Marstek selbst gerade tut. Ein direktes
-        # "target = -smoothed_power" wuerde eine Mitkopplung erzeugen: Laden
+        # "target = -raw_power" wuerde eine Mitkopplung erzeugen: Laden
         # (negativer Sollwert) erhoeht den gemessenen Netzbezug, was
         # faelschlich als "noch mehr laden noetig" interpretiert wuerde ->
         # Aufschaukeln statt Stabilisierung.
@@ -585,10 +563,10 @@ class MarstekBridge:
         current_setpoint = self.passive_ctrl.state.committed_setpoint_w
         if current_setpoint is None:
             current_setpoint = 0.0
-        target = current_setpoint + smoothed_power
+        target = current_setpoint + raw_power
         ctrl_logger.debug(
             "Integrale Zielwertberechnung: aktueller Sollwert=%.1f W + Netzbezug=%.1f W -> Ziel=%.1f W",
-            current_setpoint, smoothed_power, target,
+            current_setpoint, raw_power, target,
             extra={"category": "CONTROLLOGIC"},
         )
         cmd = self.passive_ctrl.update(target)
@@ -601,6 +579,50 @@ class MarstekBridge:
         if result.get("set_result"):
             await self.mqtt.publish_state(self.bundle.entities["passive_last_sent_power"], cmd["power"])
             self._start_countdown(cmd["cd_time"])
+
+    # ------------------------------------------------------------------ #
+    # Idle bei niedrigem SOC (eigener Hintergrund-Task)
+    # ------------------------------------------------------------------ #
+
+    async def _idle_keepalive_loop(self) -> None:
+        """Laeuft dauerhaft im Hintergrund, unabhaengig vom Shelly-
+        Nachrichtenfluss: erkennt SOC-Schwellenuebertritte und haelt das
+        Geraet waehrend einer Idle-Phase (SOC zu niedrig) aktiv am Leben -
+        mit einem kontinuierlichen Passive-Kommando bei ~0W (alle
+        cd_time/2), statt die geraeteseitige cd_time einfach ablaufen zu
+        lassen. Reines Verstreichenlassen wuerde laut Rueckmeldung dazu
+        fuehren, dass das Geraet die Verbindung/den Passive-Modus komplett
+        verliert - stattdessen bleibt der Modus aktiv erhalten, nur ohne
+        Lade-/Entladeleistung."""
+        while not self._closing:
+            try:
+                await asyncio.sleep(5.0)
+            except asyncio.CancelledError:
+                raise
+            await self._update_idle_state()
+            if not self._passive_idle_low_soc:
+                self._idle_keepalive_last_sent = None
+                continue
+            now = time.monotonic()
+            half_cd_time = max(5.0, self._passive_cd_time / 2)
+            if self._idle_keepalive_last_sent is None or (now - self._idle_keepalive_last_sent) >= half_cd_time:
+                await self._send_idle_keepalive()
+                self._idle_keepalive_last_sent = now
+
+    async def _send_idle_keepalive(self) -> None:
+        config = {"mode": "Passive", "passive_cfg": {"power": 1, "cd_time": self._passive_cd_time}}
+        try:
+            result = await self.udp.send_control("ES.SetMode", {"id": 0, "config": config})
+        except (MarstekCommunicationError, MarstekDeviceError):
+            logger.exception("Idle-Keepalive (SOC zu niedrig) konnte nicht gesendet werden")
+            return
+        if result.get("set_result"):
+            logger.info(
+                "Idle-Keepalive gesendet (SOC zu niedrig): power~0W cd_time=%ds",
+                self._passive_cd_time,
+            )
+            await self.mqtt.publish_state(self.bundle.entities["passive_last_sent_power"], 1)
+            self._start_countdown(self._passive_cd_time)
 
     # ------------------------------------------------------------------ #
     # Lokaler Countdown-Tracker (das Geraet liefert cd_time selbst nicht zurueck)

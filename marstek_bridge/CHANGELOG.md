@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.4.1
+
+- **Entfernt: Shelly-Eingangsentprellung** (`shelly_debounce_time_s`, `number.shelly_debounce_time_s`,
+  Modul `input_averager.py`). Nicht mehr benötigt - die Entprellung erfolgt
+  jetzt stattdessen auf HA-Automatisierungsebene (siehe DOCS.md fuer ein
+  Beispiel mit zeitbasiertem Trigger statt `power.changed`).
+- **Keepalive-Schwelle vereinfacht:** Der Passive-Regler sendet ein
+  unveraendertes Keepalive-Kommando jetzt nach der Haelfte der
+  geraeteseitigen `cd_time` (statt der bisherigen 20%-Marge-Logik kurz vor
+  Ablauf). Deutlich konservativer/haeufiger, mehr Sicherheitsabstand gegen
+  Verbindungsaussetzer.
+- **Kritischer Fix: Idle-bei-niedrigem-SOC sendet jetzt kontinuierlich
+  power~0 statt komplett zu schweigen.** Das bisherige Verhalten (gar
+  nichts mehr senden, `cd_time` natuerlich ablaufen lassen) wurde als
+  riskant gemeldet: dabei verliert das Geraet offenbar die
+  Passive-Verbindung/den Modus komplett, statt sauber in einen definierten
+  Zustand zu gehen. Ein neuer, von Shelly-Nachrichten unabhaengiger
+  Hintergrund-Task sendet waehrend der Idle-Phase jetzt stattdessen
+  kontinuierlich (alle `cd_time`/2) ein `Passive`-Kommando mit ~0W - der
+  Modus/die Verbindung bleibt so aktiv erhalten, nur ohne Lade-/
+  Entladeleistung.
+- **`message_settings.max_retry=0` loest keinen Communication-Fail/Watchdog
+  mehr aus.** Bisher fuehrte auch bei `max_retry=0` (nur 1 Versuch, keine
+  Wiederholung) ein einzelner fehlender Response weiterhin zur vollen
+  Eskalation (Communication-Fail-Status + Watchdog-Ausloeser) - das war
+  inkonsistent mit der Erwartung, dass `0` bedeutet "nicht als
+  Verbindungsproblem werten". Ein fehlgeschlagenes Kommando scheitert bei
+  `max_retry=0` jetzt nur noch fuer sich selbst (Exception an den
+  Aufrufer), ohne den globalen Verbindungsstatus zu beeinflussen. Betrifft
+  ausschliesslich den laufenden Betrieb (`message_settings.max_retry`) -
+  die Init-Sequenz eskaliert unabhaengig von `init_max_retries`
+  weiterhin immer bei Ausschoepfung aller Versuche.
+
 ## 0.3.0
 
 - **Neue Funktion: Idle bei niedrigem SOC.** Die automatische Passive-
