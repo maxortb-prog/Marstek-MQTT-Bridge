@@ -135,7 +135,8 @@ Wechsels in Passive vorbereitet.
 
 | Option | Standard | Bedeutung |
 |---|---|---|
-| `max_retry` | 3 | Max. Wiederholungen im laufenden Betrieb (0-10). Bei `0` wird ein einzelner fehlender Response **nicht** als Verbindungsproblem gewertet - kein `communication_fail`, kein Watchdog-Ausloeser. Nur das jeweilige Kommando scheitert fuer sich selbst. Ab `1` eskaliert ein vollstaendig ausgeschoepfter Versuch weiterhin zu `communication_fail`. |
+| `max_retry` | 3 | Max. Wiederholungen im laufenden Betrieb (0-10). Ob ein nach allen Versuchen weiterhin fehlgeschlagenes Kommando eskaliert (`communication_fail`/Watchdog), ist eine **eigene, unabhängige** Einstellung - siehe `escalate_on_failure`. |
+| `escalate_on_failure` | `true` | Ob ein Kommando, das auch nach allen Wiederholungsversuchen fehlschlägt, `communication_fail`/den Watchdog auslöst. Unabhängig von `max_retry`: auf `false` gesetzt lassen sich Robustheit (mehrere Wiederholungsversuche) und Eskalationsfreiheit kombinieren - z. B. bei einer wackligen Verbindung, bei der einzelne Aussetzer keinen Neustart erzwingen sollen. Betrifft **nicht** die Init-Sequenz beim Start, die unabhängig davon immer eskaliert. |
 | `timeout_s` | 1.0 | Timeout pro Versuch im laufenden Betrieb |
 | `min_inter_message_delay_s` | 2.0 | Mindestabstand zwischen zwei GESENDETEN Nachrichten, egal welcher Art (0-30s, 0 = deaktiviert). Verhindert, dass mehrere unabhaengige Status-Abfragen (Bat/ES.GetMode/ES.GetStatus) zufaellig praktisch gleichzeitig beim Geraet landen. **Control-Kommandos werden davon nie aufgehalten** - sie duerfen sich jederzeit sofort dazwischen einreihen, dieser Wert bremst ausschliesslich aufeinanderfolgende Status-Abfragen. |
 

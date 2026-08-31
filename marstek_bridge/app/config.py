@@ -94,6 +94,11 @@ DEFAULT_CONFIG: dict = {
     "message_settings": {
         "max_retry": 3,
         "timeout_s": 1.0,
+        "escalate_on_failure": True,  # unabhaengig von max_retry: ob ein nach
+                                      # allen Versuchen weiterhin fehlgeschlagenes
+                                      # Kommando zu Communication-Fail/Watchdog
+                                      # eskaliert. Betrifft NICHT die Init-Sequenz
+                                      # (dort wird immer eskaliert).
         "min_inter_message_delay_s": 2.0,  # Mindestabstand zw. Nachrichten,
                                            # egal welcher Kategorie (0 = aus).
                                            # Control-Kommandos werden davon

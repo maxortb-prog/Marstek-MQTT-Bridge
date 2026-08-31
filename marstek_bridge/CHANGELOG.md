@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.5.1
+
+- **Bugfix: unbehandelte Exception in der Shelly-Regelschleife.** Schlug
+  das Senden eines Passive-Kommandos fehl (z.B. Timeout bei
+  `max_retry`/`escalate_on_failure`-Konstellationen ohne Wiederholung), lief
+  die Exception bis in die MQTT-Listen-Schleife hoch (haesslicher Traceback
+  im Log). In der Praxis beobachtet und gemeldet. Der Sendeaufruf in
+  `_on_shelly_power` faengt Kommunikationsfehler jetzt ab und loggt eine
+  Warnung statt abzustuerzen - konsistent mit den bereits abgesicherten
+  Sendestellen (Poll-Loops, Idle-Keepalive, HA-Kommandos).
+- **`max_retry` und Eskalation zu `communication_fail`/Watchdog entkoppelt.**
+  Bisher bedeutete `max_retry=0` implizit "keine Eskalation" (0.4.1) - das
+  koppelte zwei eigentlich unabhaengige Fragen (Wie oft wiederholen? / Soll
+  ein endgueltiger Fehlschlag eskalieren?) unnoetig aneinander, sodass
+  Robustheit (mehrere Wiederholungsversuche) und Eskalationsfreiheit sich
+  gegenseitig ausschlossen. Neue, eigenstaendige Option
+  `message_settings.escalate_on_failure` (Standard `true`). **Migrationshinweis:**
+  wer bisher `max_retry=0` gezielt fuer "keine Eskalation" gesetzt hatte,
+  muss nach diesem Update zusaetzlich `escalate_on_failure=false` setzen,
+  um dasselbe Verhalten zu behalten - sonst eskaliert `max_retry=0` jetzt
+  wieder normal (Default). Betrifft weiterhin ausschliesslich den
+  laufenden Betrieb, nicht die Init-Sequenz.
+
 ## 0.5.0
 
 - **Neuer proportionaler Schrittbegrenzer (`step_gain`).** Bisher wurde jede

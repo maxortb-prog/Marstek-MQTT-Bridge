@@ -109,6 +109,7 @@ def build_overrides(options: dict, *, mqtt_host_override: Optional[str] = None,
         "message_settings": {
             "max_retry": int(msg.get("max_retry", 3)),
             "timeout_s": float(msg.get("timeout_s", 1.0)),
+            "escalate_on_failure": bool(msg.get("escalate_on_failure", True)),
             "min_inter_message_delay_s": float(msg.get("min_inter_message_delay_s", 2.0)),
         },
         "init": {

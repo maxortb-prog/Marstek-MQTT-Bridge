@@ -88,6 +88,7 @@ class MarstekBridge:
             ),
             runtime_policy=RuntimeRetryPolicy(
                 timeout_s=msg_cfg["timeout_s"], max_retries=msg_cfg["max_retry"],
+                escalate_on_failure=msg_cfg.get("escalate_on_failure", True),
             ),
             on_comm_state_change=self._on_comm_state_change,
             on_comm_fail_watchdog=self._on_watchdog,
@@ -606,9 +607,17 @@ class MarstekBridge:
         if cmd is None:
             return
 
-        result = await self.udp.send_control(
-            "ES.SetMode", {"id": 0, "config": {"mode": "Passive", "passive_cfg": cmd}}
-        )
+        try:
+            result = await self.udp.send_control(
+                "ES.SetMode", {"id": 0, "config": {"mode": "Passive", "passive_cfg": cmd}}
+            )
+        except (MarstekCommunicationError, MarstekDeviceError):
+            logger.warning(
+                "Passive-Kommando (power=%dW) konnte nicht gesendet werden - "
+                "wird beim naechsten Zyklus erneut versucht",
+                cmd["power"],
+            )
+            return
         if result.get("set_result"):
             await self.mqtt.publish_state(self.bundle.entities["passive_last_sent_power"], cmd["power"])
             self._start_countdown(cmd["cd_time"])

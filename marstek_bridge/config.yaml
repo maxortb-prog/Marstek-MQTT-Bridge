@@ -1,5 +1,5 @@
 name: "Marstek MQTT Bridge"
-version: "0.5.0"
+version: "0.5.1"
 slug: "marstek_bridge"
 description: >-
   Bruecke zwischen einem Marstek Energiespeicher (lokale UDP-API) und Home
@@ -58,6 +58,7 @@ options:
   message_settings:
     max_retry: 3
     timeout_s: 1.0
+    escalate_on_failure: true
     min_inter_message_delay_s: 10.0
 
   init_settings:
@@ -120,6 +121,7 @@ schema:
   message_settings:
     max_retry: "int(0,10)"
     timeout_s: "float(0.1,10)"
+    escalate_on_failure: "bool"
     min_inter_message_delay_s: "float(0,30)"
 
   init_settings:

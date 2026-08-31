@@ -136,6 +136,15 @@ class RuntimeRetryPolicy:
     timeout_s: float = 1.0
     max_retries: int = 3  # 0-10, konfigurierbar
 
+    # Unabhaengig von max_retries: steuert, ob ein nach allen Versuchen
+    # weiterhin fehlgeschlagenes Kommando zu Communication-Fail/Watchdog
+    # eskaliert. Standard True = altes Verhalten (jeder ausgeschoepfte
+    # Versuch eskaliert). Auf False setzen, um Robustheit (mehrere
+    # Wiederholungsversuche) UND Eskalationsfreiheit gleichzeitig zu haben -
+    # das war frueher nur ueber max_retries=0 (und damit ganz ohne
+    # Wiederholung) moeglich.
+    escalate_on_failure: bool = True
+
     def __post_init__(self):
         if not (0 <= self.max_retries <= 10):
             raise ValueError("max_retries muss zwischen 0 und 10 liegen")
@@ -414,19 +423,21 @@ class MarstekUDPClient:
                 self._pending.pop(req_id, None)
 
         # Alle Versuche ausgeschoepft
-        skip_escalation = (not item.is_init) and policy.max_retries == 0
+        skip_escalation = (not item.is_init) and not policy.escalate_on_failure
         if skip_escalation:
-            # max_retry=0 im laufenden Betrieb bedeutet bewusst: nur 1
-            # Versuch, aber ein einzelner fehlender Response wird NICHT als
-            # Verbindungsproblem gewertet - kein Communication-Fail-Status,
-            # kein Watchdog. Das einzelne Kommando scheitert nur fuer sich
-            # selbst (Exception an den Aufrufer). Betrifft NICHT die
-            # Init-Sequenz, die unabhaengig von dieser Einstellung immer
-            # eskaliert.
+            # escalate_on_failure=False im laufenden Betrieb bedeutet bewusst:
+            # ein nach allen Versuchen weiterhin fehlender Response wird NICHT
+            # als Verbindungsproblem gewertet - kein Communication-Fail-Status,
+            # kein Watchdog. Unabhaengig von max_retries: auch mit mehreren
+            # Wiederholungsversuchen (Robustheit gegen einzelne Aussetzer)
+            # kann so weiterhin auf Eskalation verzichtet werden. Das
+            # einzelne Kommando scheitert nur fuer sich selbst (Exception an
+            # den Aufrufer). Betrifft NICHT die Init-Sequenz, die
+            # unabhaengig von dieser Einstellung immer eskaliert.
             logger.debug(
-                "%s [%s] fehlgeschlagen nach 1 Versuch (max_retry=0) - kein "
-                "Communication-Fail/Watchdog ausgeloest",
-                category_label.value, item.method, extra={"category": category_label},
+                "%s [%s] nach %d Versuch(en) fehlgeschlagen (escalate_on_failure=false) - "
+                "kein Communication-Fail/Watchdog ausgeloest",
+                category_label.value, item.method, policy.max_attempts, extra={"category": category_label},
             )
         else:
             self._on_failure(item, last_error)

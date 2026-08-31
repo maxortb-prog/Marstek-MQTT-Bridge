@@ -119,7 +119,10 @@ configuration:
     fields:
       max_retry:
         name: "Max retries"
-        description: "Maximum retries before the command is considered failed, 0-10. Note: with 0, a single failed command is tolerated silently (fails for its own caller) and does NOT trigger Communication Fail or the watchdog - only values >= 1 escalate to a connection-level failure after all attempts are exhausted."
+        description: "Maximum retries before the command is considered failed, 0-10. Whether an exhausted command escalates to Communication Fail/the watchdog is now a separate, independent setting - see escalate_on_failure below."
+      escalate_on_failure:
+        name: "Escalate on failure"
+        description: "Whether a command that still fails after all retry attempts triggers Communication Fail and the watchdog. Independent of max_retry: set to false to combine robustness (multiple retries) with no escalation, e.g. for a flaky connection where isolated failures shouldn't force a restart. Default true matches the original behavior. Does not affect the startup init sequence, which always escalates."
       timeout_s:
         name: "Timeout"
         description: "Timeout per attempt, in seconds."

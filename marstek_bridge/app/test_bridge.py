@@ -879,3 +879,38 @@ async def test_restart_continuity_does_not_force_passive_when_device_in_other_mo
     finally:
         await bridge.stop()
         server.stop()
+
+
+@pytest.mark.asyncio
+async def test_shelly_send_failure_does_not_crash_message_loop(tmp_path):
+    """Kernanforderung (in der Praxis beobachtet und gemeldet): schlaegt das
+    Senden des Passive-Kommandos fehl (z.B. Timeout bei max_retry=0), darf
+    das NICHT als unbehandelte Exception bis in die MQTT-Listen-Schleife
+    durchschlagen - die Bridge muss weiterhin normal funktionieren."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    server.set_behavior("ES.SetMode", MethodBehavior(drop_first_n=999))  # Passive-Kommandos scheitern immer
+    cfg = _test_config(tmp_path, port, shelly={"power_topic": "shellies/em/power"},
+                        message_settings={"timeout_s": 0.2, "max_retry": 0, "min_inter_message_delay_s": 0})
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="shelly-sim-fail") as shelly:
+            await shelly.publish("shellies/em/power", "300", qos=0)
+        await asyncio.sleep(0.5)  # Zeit fuer den fehlschlagenden Sendeversuch
+
+        # Bridge muss danach weiterhin normal auf neue Nachrichten reagieren
+        # (Beweis, dass die Listen-Schleife nicht abgestuerzt/haengengeblieben ist)
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="ha-sim-after-fail") as ha:
+            await ha.publish("Marstek-Bridge-Control/passive_default_power/set", "222", qos=1)
+        await asyncio.sleep(0.3)
+
+        msgs = await _collect("Marstek-Bridge-Control/passive_default_power/state", 1, timeout=2.0)
+        assert msgs and msgs[0][1] == "222.0", "Bridge haette nach dem fehlgeschlagenen Sendeversuch weiterlaufen muessen"
+    finally:
+        await bridge.stop()
+        server.stop()
