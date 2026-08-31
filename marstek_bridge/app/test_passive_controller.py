@@ -311,3 +311,101 @@ def test_discharge_cap_keepalive_still_works_while_capped():
     cmd = ctrl.update(271, now=31.0)
     assert cmd is not None
     assert cmd["power"] == 200
+
+
+def test_step_gain_default_matches_old_full_step_behavior():
+    """Regressionstest: step_gain=1.0 (Default) muss exakt das alte
+    Verhalten reproduzieren - Abweichungen unterhalb max_step_w werden in
+    einem Schritt voll uebernommen."""
+    cfg = PassiveControllerConfig(deadzone_w=5, min_setpoint_change_w=5, max_step_w=100,
+                                   min_send_interval_s=0)
+    ctrl = PassiveController(cfg)
+    ctrl.update(0, now=0.0)
+    cmd = ctrl.update(50, now=1.0)  # Abweichung 50W < max_step_w 100W
+    assert cmd is not None
+    assert cmd["power"] == 50, "step_gain=1.0 haette die volle Abweichung in einem Schritt uebernehmen sollen"
+
+
+def test_step_gain_dampens_small_deviations():
+    """Kernanforderung: step_gain < 1.0 daempft Abweichungen unterhalb
+    max_step_w proportional, statt sie sofort voll zu uebernehmen."""
+    cfg = PassiveControllerConfig(deadzone_w=1, min_setpoint_change_w=1, max_step_w=100,
+                                   min_send_interval_s=0, step_gain=0.4)
+    ctrl = PassiveController(cfg)
+    ctrl.update(0, now=0.0)
+    cmd = ctrl.update(50, now=1.0)  # Abweichung 50W, gedaempft: 50*0.4=20W
+    assert cmd is not None
+    assert cmd["power"] == 20
+
+
+def test_step_gain_still_caps_large_deviations_at_max_step_w():
+    """Auch mit gedaempftem step_gain muessen GROSSE Abweichungen weiterhin
+    mit voller max_step_w-Geschwindigkeit konvergieren, sobald die
+    proportionale Rechnung max_step_w uebersteigt - kein Trade-off mehr
+    zwischen 'schnell bei grossen Spruengen' und 'ruhig bei Rauschen'."""
+    cfg = PassiveControllerConfig(deadzone_w=1, min_setpoint_change_w=1, max_step_w=100,
+                                   min_send_interval_s=0, step_gain=0.4)
+    ctrl = PassiveController(cfg)
+    ctrl.update(0, now=0.0)
+    # Abweichung 1000W, proportional waere 400W, aber gedeckelt auf max_step_w=100W
+    cmd = ctrl.update(1000, now=1.0)
+    assert cmd is not None
+    assert cmd["power"] == 100
+
+
+def test_zero_crossing_hysteresis_blocks_small_sign_flip():
+    """Kernanforderung: ein Vorzeichenwechsel (Entladen->Laden) wird bei
+    aktiver Hysterese nur zugelassen, wenn der neue Zielwert die Schwelle
+    jenseits der Null erreicht - sonst wird auf 0 eingefangen."""
+    cfg = PassiveControllerConfig(deadzone_w=1, min_setpoint_change_w=1, max_step_w=1000,
+                                   min_send_interval_s=0, zero_crossing_hysteresis_w=30)
+    ctrl = PassiveController(cfg)
+    ctrl.update(200, now=0.0)  # entlaedt mit 200W
+
+    # kleine negative Last (-10W) -> WUERDE ins Laden wechseln, aber unter der
+    # 30W-Schwelle -> wird auf 0 eingefangen, nicht auf -10
+    cmd = ctrl.update(-10, now=1.0)
+    assert cmd is not None
+    assert cmd["power"] == 1, "sollte auf ~0W eingefangen werden (power=0 wird zu 1 genudged), nicht -10"
+
+
+def test_zero_crossing_hysteresis_allows_crossing_beyond_threshold():
+    """Ist die Abweichung gross genug, muss der Vorzeichenwechsel trotz
+    Hysterese durchgelassen werden."""
+    cfg = PassiveControllerConfig(deadzone_w=1, min_setpoint_change_w=1, max_step_w=1000,
+                                   min_send_interval_s=0, zero_crossing_hysteresis_w=30)
+    ctrl = PassiveController(cfg)
+    ctrl.update(200, now=0.0)  # entlaedt mit 200W
+
+    cmd = ctrl.update(-50, now=1.0)  # -50W liegt jenseits der 30W-Schwelle
+    assert cmd is not None
+    assert cmd["power"] == -50
+
+
+def test_zero_crossing_hysteresis_disabled_by_default():
+    """Regressionstest: zero_crossing_hysteresis_w=0.0 (Default) darf das
+    alte Verhalten (sofortiger Vorzeichenwechsel) nicht veraendern."""
+    cfg = PassiveControllerConfig(deadzone_w=1, min_setpoint_change_w=1, max_step_w=1000,
+                                   min_send_interval_s=0)
+    ctrl = PassiveController(cfg)
+    ctrl.update(200, now=0.0)
+    cmd = ctrl.update(-10, now=1.0)
+    assert cmd is not None
+    assert cmd["power"] == -10, "ohne Hysterese (Default) haette der Vorzeichenwechsel sofort durchgehen muessen"
+
+
+def test_zero_crossing_hysteresis_symmetric_for_charge_to_discharge():
+    """Hysterese muss in beide Richtungen wirken (Laden->Entladen genauso
+    wie Entladen->Laden)."""
+    cfg = PassiveControllerConfig(deadzone_w=1, min_setpoint_change_w=1, max_step_w=1000,
+                                   min_send_interval_s=0, zero_crossing_hysteresis_w=30)
+    ctrl = PassiveController(cfg)
+    ctrl.update(-200, now=0.0)  # laedt mit 200W
+
+    cmd_blocked = ctrl.update(10, now=1.0)  # zu klein, sollte auf 0 eingefangen werden
+    assert cmd_blocked is not None
+    assert cmd_blocked["power"] == 1
+
+    cmd_allowed = ctrl.update(50, now=2.0)  # jenseits der Schwelle -> durchgelassen
+    assert cmd_allowed is not None
+    assert cmd_allowed["power"] == 50

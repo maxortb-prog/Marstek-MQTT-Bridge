@@ -97,6 +97,12 @@ configuration:
       min_send_interval_s:
         name: "Minimum send interval"
         description: "Minimum time between two sent commands, 0-60s (0 = no minimum, send immediately when needed)."
+      step_gain:
+        name: "Step gain"
+        description: "Proportional factor for the step size per cycle: step = clamp(deviation * step_gain, -max_step_w, max_step_w). Default 1.0 reproduces the old fixed step limiter (deviations below max_step_w are applied in full in one cycle). Lower values (e.g. 0.3-0.5) additionally dampen small deviations for a gentler response, while large deviations still converge at up to max_step_w per cycle - no more trade-off between fast large corrections and calm behavior on small noise."
+      zero_crossing_hysteresis_w:
+        name: "Zero-crossing hysteresis"
+        description: "Threshold (W) a new target must exceed beyond zero before a sign change (charge <-> discharge) is allowed. Below the threshold, the target is captured at 0W instead of flipping direction - prevents rapid switching between charging and discharging for loads that hover near zero. Default 0 disables this (immediate sign changes allowed, as before)."
       idle_soc_threshold:
         name: "Idle SOC threshold"
         description: "SOC (%) below which the automatic Passive-mode regulation pauses entirely: no more commands are sent, the device's own cd_time countdown expires naturally, and it falls back to idle. SOC source: whichever of Bat.GetStatus.soc / ES.GetStatus.bat_soc updated most recently. Adjustable live via number.idle_soc_threshold."

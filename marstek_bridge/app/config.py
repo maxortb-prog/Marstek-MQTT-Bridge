@@ -73,6 +73,12 @@ DEFAULT_CONFIG: dict = {
         "max_output_w": 800,     # harte Einspeisegrenze - Marstek koennte mehr,
                                  # das ist aktuell eine bewusste Zusatzbegrenzung
         "min_send_interval_s": 30,
+        "step_gain": 1.0,                # proportionaler Schrittfaktor, siehe
+                                          # passive_controller.py. 1.0 = alter
+                                          # fester Schrittbegrenzer (rueckwaertskompatibel).
+        "zero_crossing_hysteresis_w": 0.0,  # Schwelle fuer einen Vorzeichenwechsel
+                                             # (Laden<->Entladen). 0 = deaktiviert
+                                             # (rueckwaertskompatibel).
         "idle_soc_threshold": 5.0,       # SOC-Schwelle [%], unter der die automatische
                                           # Passive-Regelung pausiert (kein Senden mehr,
                                           # cd_time laeuft ab -> Geraet faellt in Idle).
@@ -191,6 +197,10 @@ class MarstekConfig:
             raise ConfigError("controller.idle_soc_threshold muss zwischen 0 und 100 liegen")
         if not (0 <= float(ctrl.get("idle_soc_resume_margin", 3.0)) <= 100):
             raise ConfigError("controller.idle_soc_resume_margin muss zwischen 0 und 100 liegen")
+        if not (0.0 < float(ctrl.get("step_gain", 1.0)) <= 1.0):
+            raise ConfigError("controller.step_gain muss zwischen > 0 und <= 1 liegen")
+        if float(ctrl.get("zero_crossing_hysteresis_w", 0.0)) < 0:
+            raise ConfigError("controller.zero_crossing_hysteresis_w darf nicht negativ sein")
 
         pm = self._data["passive_mode"]
         if not (0 < int(pm["cd_time"]) <= int(pm["max_cd_time"])):

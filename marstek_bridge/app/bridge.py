@@ -130,6 +130,8 @@ class MarstekBridge:
             min_output_w=ctrl_cfg["min_output_w"],
             max_output_w=ctrl_cfg["max_output_w"],
             min_send_interval_s=ctrl_cfg["min_send_interval_s"],
+            step_gain=ctrl_cfg.get("step_gain", 1.0),
+            zero_crossing_hysteresis_w=ctrl_cfg.get("zero_crossing_hysteresis_w", 0.0),
             default_cd_time_s=pm_cfg["cd_time"],
             max_cd_time_s=pm_cfg["max_cd_time"],
         ))

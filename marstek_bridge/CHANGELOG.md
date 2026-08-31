@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.5.0
+
+- **Neuer proportionaler Schrittbegrenzer (`step_gain`).** Bisher wurde jede
+  Abweichung unterhalb `max_step_w` in EINEM Zyklus voll uebernommen (kein
+  Slew fuer kleine Aenderungen), waehrend nur groessere Abweichungen auf
+  `max_step_w`/Zyklus gedeckelt wurden. Das erzeugte einen strukturellen
+  Zielkonflikt: ein `max_step_w` klein genug fuer ruhiges Verhalten bei
+  Rauschen war zwangslaeufig zu traege fuer grosse Lastspruenge, und
+  umgekehrt. Neuer Parameter `step_gain` (Standard 1.0, rueckwaertskompatibel)
+  skaliert den Schritt proportional zur Abweichung (`Schritt = clamp(Abweichung
+  * step_gain, -max_step_w, max_step_w)`) - Werte < 1.0 daempfen kleine
+  Abweichungen zusaetzlich, waehrend grosse Abweichungen weiterhin mit voller
+  `max_step_w`-Geschwindigkeit konvergieren.
+- **Neue Nulldurchgangs-Hysterese (`zero_crossing_hysteresis_w`).** Bisher
+  wurde jeder Vorzeichenwechsel (Laden↔Entladen) sofort durchgelassen, sobald
+  er ausserhalb von Totzone/Mindeständerung lag - bei Lasten, die knapp um
+  den Nullpunkt pendeln, fuehrte das zu haeufigem, unnoetigem Umschalten
+  zwischen Laden und Entladen. Neuer Parameter (Standard 0.0, deaktiviert,
+  rueckwaertskompatibel) verlangt eine konfigurierbare Mindestabweichung
+  jenseits der Null, bevor die Richtung tatsaechlich gewechselt wird -
+  darunter wird der Zielwert auf 0W eingefangen statt umzuschalten.
+- Beide neuen Parameter sind reine Config-Optionen (kein HA-Entity, wie
+  auch `deadzone_w`/`min_setpoint_change_w`/`max_step_w`), Aenderung
+  erfordert einen Add-on-Neustart.
+
 ## 0.4.2
 
 - **Bugfix: cd_time-Kontinuität nach Neustart unvollständig.** Die in 0.1.0

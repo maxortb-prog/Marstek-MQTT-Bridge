@@ -72,6 +72,24 @@ class PassiveControllerConfig:
     max_output_w: float = 800.0         # Einspeisegrenze (positiv = Einspeisen)
     min_send_interval_s: float = 30.0   # 0-60s, 0 = keine Wartezeit zwischen Sendungen
 
+    # Proportionaler Schritt: schritt = clamp(abweichung * step_gain, -max_step_w, max_step_w).
+    # Default 1.0 = rueckwaertskompatibel (identisch zum alten festen Schrittbegrenzer:
+    # Abweichungen unterhalb max_step_w werden in EINEM Schritt voll uebernommen).
+    # Werte < 1.0 daempfen kleine Abweichungen zusaetzlich, waehrend grosse
+    # Abweichungen weiterhin bis max_step_w/Zyklus konvergieren (kein Trade-off
+    # zwischen "schnell bei grossen Spruengen" und "ruhig bei kleinem Rauschen"
+    # mehr noetig).
+    step_gain: float = 1.0
+
+    # Nulldurchgangs-Hysterese: verhindert haeufiges Hin- und Herschalten
+    # zwischen Laden und Entladen bei Lasten, die knapp um den Nullpunkt
+    # pendeln. Ein Vorzeichenwechsel des Sollwerts wird nur zugelassen, wenn
+    # der neue Zielwert diese Schwelle (in Watt, jenseits der Null) erreicht -
+    # sonst wird der Zielwert auf 0 "eingefangen" (dort greift wie ueberall
+    # der bestehende Slew-Rate-Mechanismus normal weiter). Default 0.0 = aus
+    # (jeder Vorzeichenwechsel wird sofort zugelassen, altes Verhalten).
+    zero_crossing_hysteresis_w: float = 0.0
+
     # Optionen -> Passiv Mode Settings (cd_time, das mit jedem Kommando mitgeht)
     default_cd_time_s: int = 60
     max_cd_time_s: int = 3600
@@ -87,6 +105,10 @@ class PassiveControllerConfig:
             raise ValueError("min_output_w muss kleiner als max_output_w sein")
         if self.max_step_w <= 0:
             raise ValueError("max_step_w muss > 0 sein")
+        if not (0.0 < self.step_gain <= 1.0):
+            raise ValueError("step_gain muss zwischen > 0 und <= 1 liegen")
+        if self.zero_crossing_hysteresis_w < 0:
+            raise ValueError("zero_crossing_hysteresis_w darf nicht negativ sein")
         if self.deadzone_w < 0 or self.min_setpoint_change_w < 0:
             raise ValueError("deadzone_w / min_setpoint_change_w duerfen nicht negativ sein")
 
@@ -196,6 +218,31 @@ class PassiveController:
             st.committed_setpoint_w = clamped
             return self._maybe_send(clamped, now, force=True, reason="initial")
 
+        # 1b) Nulldurchgangs-Hysterese: verhindert haeufiges Umschalten
+        # zwischen Laden und Entladen bei Lasten, die knapp um den Nullpunkt
+        # pendeln. Ein Vorzeichenwechsel wird nur zugelassen, wenn der neue
+        # Zielwert die konfigurierte Schwelle jenseits der Null erreicht -
+        # sonst wird der Zielwert auf 0 "eingefangen" und faellt danach ganz
+        # normal in Totzone/Slew-Rate/Mindeständerung wie jeder andere Wert.
+        if cfg.zero_crossing_hysteresis_w > 0:
+            committed = st.committed_setpoint_w
+            crosses_to_charge = committed > 0 and clamped < 0
+            crosses_to_discharge = committed < 0 and clamped > 0
+            if crosses_to_charge and clamped > -cfg.zero_crossing_hysteresis_w:
+                ctrl_logger.debug(
+                    "Nulldurchgangs-Hysterese: Ziel %.1f W noch nicht jenseits -%.1f W -> "
+                    "auf 0 W eingefangen (bleibt bei Entladen-Richtung)",
+                    clamped, cfg.zero_crossing_hysteresis_w, extra={"category": "CONTROLLOGIC"},
+                )
+                clamped = 0.0
+            elif crosses_to_discharge and clamped < cfg.zero_crossing_hysteresis_w:
+                ctrl_logger.debug(
+                    "Nulldurchgangs-Hysterese: Ziel %.1f W noch nicht jenseits +%.1f W -> "
+                    "auf 0 W eingefangen (bleibt bei Laden-Richtung)",
+                    clamped, cfg.zero_crossing_hysteresis_w, extra={"category": "CONTROLLOGIC"},
+                )
+                clamped = 0.0
+
         # 2) Totzone (bezogen auf den aktuellen internen Sollwert)
         deviation = clamped - st.committed_setpoint_w
         ctrl_logger.debug(
@@ -217,8 +264,13 @@ class PassiveController:
             )
             return None
 
-        # 3) Slew-Rate-Begrenzung
-        step = max(-cfg.max_step_w, min(cfg.max_step_w, deviation))
+        # 3) Proportionale Slew-Rate-Begrenzung: Schritt = Abweichung * step_gain,
+        # gedeckelt auf max_step_w. Bei step_gain=1.0 (Default) identisch zum
+        # alten festen Schrittbegrenzer (rueckwaertskompatibel). Werte < 1.0
+        # daempfen kleine Abweichungen zusaetzlich, waehrend grosse
+        # Abweichungen weiterhin mit bis zu max_step_w/Zyklus konvergieren.
+        proportional_step = deviation * cfg.step_gain
+        step = max(-cfg.max_step_w, min(cfg.max_step_w, proportional_step))
         new_committed = st.committed_setpoint_w + step
         new_committed = max(cfg.min_output_w, min(effective_max, new_committed))
         st.committed_setpoint_w = new_committed
