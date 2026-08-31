@@ -152,6 +152,7 @@ class MarstekBridge:
         # auf einen stark abweichenden Wert statt sanft anzupassen).
         if isinstance(startup_result.es_mode, dict):
             last_known_output = startup_result.es_mode.get("ongrid_power")
+            current_device_mode = startup_result.es_mode.get("mode")
             if last_known_output is not None:
                 self.passive_ctrl.state.committed_setpoint_w = float(last_known_output)
                 self.passive_ctrl.state.last_sent_setpoint_w = float(last_known_output)
@@ -160,6 +161,36 @@ class MarstekBridge:
                     "starte mit %.0fW (aus ES.GetMode.ongrid_power) statt 0W",
                     last_known_output,
                 )
+                if current_device_mode == "Passive":
+                    # Das Seeding oben aktualisiert nur den INTERNEN Zustand,
+                    # sendet aber nichts ans Geraet - die dortige cd_time laeuft
+                    # unbeeinflusst weiter (evtl. schon fast abgelaufen), und
+                    # "Passive Countdown Remaining" bliebe uninitialisiert. Nur
+                    # wenn das Geraet gerade tatsaechlich im Passive-Mode ist
+                    # (kein ungewollter Moduswechsel!), wird der gleiche Wert
+                    # jetzt aktiv nochmal gesendet, um die geraeteseitige
+                    # cd_time frisch zu setzen und den lokalen Countdown zu
+                    # (re-)initialisieren.
+                    refresh_power = int(round(last_known_output))
+                    if refresh_power == 0:
+                        refresh_power = 1
+                    try:
+                        refresh_result = await self.udp.send_control(
+                            "ES.SetMode",
+                            {"id": 0, "config": {"mode": "Passive", "passive_cfg": {
+                                "power": refresh_power, "cd_time": self._passive_cd_time,
+                            }}},
+                        )
+                    except (MarstekCommunicationError, MarstekDeviceError):
+                        logger.exception("cd_time-Auffrischung nach Neustart fehlgeschlagen")
+                    else:
+                        if refresh_result.get("set_result"):
+                            self.passive_ctrl.state.last_send_monotonic = time.monotonic()
+                            self._start_countdown(self._passive_cd_time)
+                            logger.info(
+                                "cd_time nach Neustart aufgefrischt (power=%dW, cd_time=%ds)",
+                                refresh_power, self._passive_cd_time,
+                            )
 
         # Idle-bei-niedrigem-SOC: jeweils zuletzt aktualisierter SOC-Wert aus
         # Bat.GetStatus.soc ODER ES.GetStatus.bat_soc (unterschiedliche

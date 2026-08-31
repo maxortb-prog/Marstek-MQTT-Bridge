@@ -106,6 +106,16 @@ abgefragten `ES.GetMode.ongrid_power`-Wert als Startpunkt für den Regler -
 die erste automatische Korrektur nach einem Neustart baut also auf dem
 tatsächlichen Gerätezustand auf, nicht auf einer Annahme von 0W.
 
+Läuft das Gerät zu diesem Zeitpunkt bereits im Passive-Mode, sendet die
+Bridge zusätzlich sofort ein `ES.SetMode`-Kommando mit genau diesem Wert
+erneut - das setzt die geräteseitige `cd_time` frisch (die seit dem
+letzten Kommando vor dem Neustart bereits weitergelaufen sein könnte) und
+initialisiert den lokalen Countdown (`sensor.passive_cd_time_remaining`)
+neu. Läuft das Gerät dagegen in einem anderen Modus (z. B. Auto), wird
+**nichts** gesendet - die Bridge erzwingt keinen Moduswechsel, nur der
+interne Sollwert wird für den Fall eines späteren manuellen/automatischen
+Wechsels in Passive vorbereitet.
+
 | Option | Standard | Bedeutung |
 |---|---|---|
 | `deadzone_w` | 40 | Rauschunterdrueckung, W |

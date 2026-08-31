@@ -813,3 +813,69 @@ async def test_idle_soc_threshold_live_adjustable_via_ha(tmp_path):
     finally:
         await bridge.stop()
         server.stop()
+
+
+@pytest.mark.asyncio
+async def test_restart_continuity_refreshes_cd_time_when_device_already_passive(tmp_path):
+    """Kernanforderung: nach einem Neustart, waehrend das Geraet bereits im
+    Passive-Mode laeuft, muss die Bridge nicht nur den internen Sollwert
+    seeden, sondern auch aktiv den gleichen Wert erneut senden - damit die
+    geraeteseitige cd_time frisch gesetzt und der lokale Countdown
+    ('Passive Countdown Remaining') initialisiert wird."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    server.set_behavior("ES.GetMode", MethodBehavior(
+        result={"mode": "Passive", "ongrid_power": 187, "offgrid_power": 0, "bat_soc": 33}))
+    cfg = _test_config(tmp_path, port, passive_mode={"power": 800, "cd_time": 90, "max_cd_time": 3600})
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+
+        # Seeding korrekt uebernommen
+        assert bridge.passive_ctrl.state.committed_setpoint_w == 187.0
+
+        # UND: die cd_time wurde aktiv aufgefrischt (Countdown initialisiert)
+        assert bridge._passive_cd_deadline is not None
+        remaining = bridge._passive_cd_deadline - time.monotonic()
+        assert remaining > 85, f"Countdown haette nahe der vollen cd_time (90s) starten sollen, war {remaining:.1f}s"
+
+        # UND: es wurde tatsaechlich ein ES.SetMode(Passive, power=187) gesendet
+        passive_calls = [r for r in server.received
+                          if r["method"] == "ES.SetMode" and r["params"]["config"]["mode"] == "Passive"]
+        assert passive_calls, "cd_time-Auffrischung haette ein ES.SetMode senden muessen"
+        assert passive_calls[-1]["params"]["config"]["passive_cfg"]["power"] == 187
+        assert passive_calls[-1]["params"]["config"]["passive_cfg"]["cd_time"] == 90
+    finally:
+        await bridge.stop()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_restart_continuity_does_not_force_passive_when_device_in_other_mode(tmp_path):
+    """Regressionstest: ist das Geraet beim Neustart NICHT im Passive-Mode
+    (z.B. Auto), darf die Bridge es NICHT ungefragt in Passive zwingen -
+    nur der interne Sollwert wird geseedet, kein aktives Senden."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    server.set_behavior("ES.GetMode", MethodBehavior(
+        result={"mode": "Auto", "ongrid_power": 150, "offgrid_power": 0, "bat_soc": 33}))
+    cfg = _test_config(tmp_path, port)
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+
+        assert bridge.passive_ctrl.state.committed_setpoint_w == 150.0
+        assert bridge._passive_cd_deadline is None, "Countdown haette NICHT gestartet werden duerfen (Geraet ist im Auto-Mode)"
+
+        passive_calls = [r for r in server.received
+                          if r["method"] == "ES.SetMode" and r["params"]["config"]["mode"] == "Passive"]
+        assert not passive_calls, "Es haette KEIN Passive-Kommando gesendet werden duerfen"
+    finally:
+        await bridge.stop()
+        server.stop()

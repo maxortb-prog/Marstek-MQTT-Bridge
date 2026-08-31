@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.2
+
+- **Bugfix: cd_time-Kontinuität nach Neustart unvollständig.** Die in 0.1.0
+  eingeführte Sollwert-Kontinuität (Seeding von `ES.GetMode.ongrid_power`
+  beim Start) aktualisierte bisher nur den INTERNEN Regler-Zustand, sendete
+  aber nichts ans Geraet: die geraeteseitige `cd_time` lief unbeeinflusst
+  weiter (moeglicherweise kurz vor Ablauf), und `sensor.passive_cd_time_remaining`
+  blieb uninitialisiert. Laeuft das Geraet beim Neustart bereits im
+  Passive-Mode, sendet die Bridge jetzt sofort ein `ES.SetMode`-Kommando
+  mit dem geseedeten Wert erneut - setzt die geraeteseitige `cd_time`
+  frisch und initialisiert den lokalen Countdown. Laeuft das Geraet in
+  einem anderen Modus (z.B. Auto), wird bewusst NICHTS gesendet - kein
+  erzwungener Moduswechsel.
+
 ## 0.4.1
 
 - **Entfernt: Shelly-Eingangsentprellung** (`shelly_debounce_time_s`, `number.shelly_debounce_time_s`,
