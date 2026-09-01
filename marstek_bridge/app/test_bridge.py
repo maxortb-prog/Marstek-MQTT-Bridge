@@ -914,3 +914,85 @@ async def test_shelly_send_failure_does_not_crash_message_loop(tmp_path):
     finally:
         await bridge.stop()
         server.stop()
+
+
+@pytest.mark.asyncio
+async def test_countdown_keepalive_fires_without_any_shelly_messages(tmp_path):
+    """Kernanforderung (in der Praxis beobachtet und gemeldet): das Keepalive
+    darf NICHT ausschliesslich von Shelly-Nachrichten abhaengen - der
+    unabhaengig laufende lokale Countdown muss selbst dann zuverlaessig
+    ein Passive-Kommando erneut senden, wenn ueberhaupt keine Shelly-
+    Nachricht eintrifft."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    cfg = _test_config(tmp_path, port, passive_mode={"power": 196, "cd_time": 4, "max_cd_time": 3600})
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="ha-sim-cdkeepalive") as ha:
+            await ha.publish("Marstek-Bridge-Control/energy_mode/set", "Passive", qos=1)
+        await asyncio.sleep(0.3)
+
+        calls_after_activation = len([r for r in server.received if r["method"] == "ES.SetMode"])
+
+        # Ohne JEDE Shelly-Nachricht: nach der Haelfte von cd_time (4s -> 2s)
+        # muss der Countdown-Loop selbststaendig erneut senden.
+        await asyncio.sleep(2.5)
+
+        calls_after_wait = [r for r in server.received if r["method"] == "ES.SetMode"
+                             and r["params"]["config"]["mode"] == "Passive"]
+        assert len(calls_after_wait) > calls_after_activation, (
+            "Der Countdown-Loop haette ohne jede Shelly-Nachricht selbststaendig "
+            "erneut senden muessen"
+        )
+        assert calls_after_wait[-1]["params"]["config"]["passive_cfg"]["power"] == 196
+    finally:
+        await bridge.stop()
+        server.stop()
+
+
+@pytest.mark.asyncio
+async def test_countdown_keepalive_does_not_fire_while_soc_idle(tmp_path):
+    """Waehrend SOC-Idle uebernimmt der eigene Idle-Keepalive-Task das
+    Auffrischen (mit power~0) - der normale Countdown-Keepalive (mit dem
+    zuletzt regulaer gesendeten Wert) darf sich damit nicht ueberschneiden."""
+    server = FakeMarstekServer()
+    port = await server.start()
+    _setup_full_server_behavior(server)
+    server.set_behavior("Bat.GetStatus", MethodBehavior(result={"soc": 3}))  # < Idle-Schwelle
+    cfg = _test_config(tmp_path, port, passive_mode={"power": 196, "cd_time": 4, "max_cd_time": 3600},
+                        status_polling={"bat_status_interval_s": 999999, "es_mode_interval_s": 999999,
+                                        "es_status_interval_s": 999999},
+                        controller={"deadzone_w": 5, "min_setpoint_change_w": 5, "max_step_w": 2000,
+                                    "min_output_w": -1500, "max_output_w": 800, "min_send_interval_s": 0,
+                                    "idle_soc_threshold": 5.0, "idle_soc_resume_margin": 3.0})
+
+    bridge = MarstekBridge(cfg)
+    await asyncio.sleep(0.1)
+    try:
+        await bridge.start()
+        async with aiomqtt.Client(BROKER_HOST, BROKER_PORT, identifier="ha-sim-cdkeepalive2") as ha:
+            await ha.publish("Marstek-Bridge-Control/energy_mode/set", "Passive", qos=1)
+        await asyncio.sleep(0.3)
+        # SOC-Idle wird beim naechsten Zyklus des Idle-Hintergrund-Tasks (max 5s) erkannt
+        await asyncio.sleep(5.5)
+
+        passive_calls = [r for r in server.received if r["method"] == "ES.SetMode"
+                          and r["params"]["config"]["mode"] == "Passive"]
+        # Alle gesendeten Werte muessen ~0 (Idle) sein, NICHT der reguläre
+        # Sollwert 196 (das waere der Countdown-Keepalive, der hier nicht
+        # zusaetzlich haette feuern duerfen)
+        assert bridge._passive_idle_low_soc is True
+        powers = [c["params"]["config"]["passive_cfg"]["power"] for c in passive_calls]
+        # Vor der Idle-Erkennung (die separat alle 5s prueft) koennen bei
+        # kurzer Test-cd_time durchaus mehrere legitime 196W-Keepalives
+        # laufen - relevant ist nur, dass NACH der Idle-Erkennung kein
+        # regulaerer 196W-Wert mehr gesendet wird.
+        assert powers[-1] == 1, f"Nach Idle-Erkennung haette nur noch der Idle-Wert (~0W) gesendet werden duerfen: {powers}"
+    finally:
+        await bridge.stop()
+        server.stop()

@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.5.2
+
+- **Kritischer Fix: Keepalive-Drift bei seltenen Shelly-Nachrichten.** Das
+  im Passive-Regler eingebaute Keepalive wird nur geprueft, wenn tatsaechlich
+  eine Shelly-Nachricht eintrifft (`update()` wird sonst gar nicht
+  aufgerufen). Bei niedriger/unregelmaessiger Shelly-Nachrichtenrate driftete
+  die tatsaechliche Sendung dadurch immer weiter gegenueber der halben
+  `cd_time` nach hinten - im schlimmsten Fall bis zum tatsaechlichen Ablauf
+  von `cd_time` auf dem Geraet. In der Praxis beobachtet und gemeldet
+  (Sendeabstand waechst ueber viele Zyklen kontinuierlich von ~60s auf
+  70s+). Der ohnehin unabhaengig laufende lokale Countdown
+  (`sensor.passive_cd_time_remaining`) dient jetzt zusaetzlich als
+  zuverlaessiger, von der Shelly-Nachrichtenrate entkoppelter Backstop -
+  sobald die Haelfte von `cd_time` seit der letzten Sendung verstrichen
+  ist, sendet der Countdown-Task selbststaendig erneut, unabhaengig davon,
+  ob gerade eine Shelly-Nachricht eintrifft.
+- **Bugfix: Regler-Zustand nach manueller Passive-Aktivierung inkonsistent.**
+  Die manuelle Aktivierung des Passive-Mode ueber das HA-Dropdown lief
+  bewusst nicht ueber `passive_ctrl.update()`, wodurch der interne
+  Regler-Zustand (`last_sent_setpoint_w`) nach einer rein manuellen
+  Aktivierung `None` blieb - der neue Countdown-Keepalive-Backstop hatte
+  dadurch keinen bekannten Referenzwert zum Auffrischen. Die manuelle
+  Aktivierung seedet den Regler-Zustand jetzt konsistent mit dem
+  tatsaechlich gesendeten Wert.
+
 ## 0.5.1
 
 - **Bugfix: unbehandelte Exception in der Shelly-Regelschleife.** Schlug

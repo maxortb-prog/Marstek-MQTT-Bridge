@@ -522,6 +522,14 @@ class MarstekBridge:
                 # vorher optimistisch) - sonst wuerde die Anzeige neu starten,
                 # obwohl das Kommando das Geraet nie erreicht hat.
                 self._start_countdown(cd_time)
+                # Regler-Zustand konsistent halten: manuelle Aktivierung laeuft
+                # bewusst NICHT ueber passive_ctrl.update(), sonst haette der
+                # Countdown-Keepalive (siehe _send_passive_keepalive_from_countdown)
+                # nach einer rein manuellen Aktivierung keinen bekannten
+                # Referenzwert zum Auffrischen von cd_time.
+                self.passive_ctrl.state.committed_setpoint_w = float(power)
+                self.passive_ctrl.state.last_sent_setpoint_w = float(power)
+                self.passive_ctrl.state.last_send_monotonic = time.monotonic()
 
     def _enter_passive_mode(self) -> None:
         """Schaltet den ControlLogic-Debug-Logger automatisch auf DEBUG,
@@ -680,10 +688,46 @@ class MarstekBridge:
                 await self.mqtt.publish_state(self.bundle.entities["passive_cd_time_remaining"], remaining)
                 if remaining <= 0:
                     self._passive_cd_deadline = None
+                elif not self._passive_idle_low_soc and remaining <= self._passive_cd_time / 2:
+                    # Zuverlaessiger Backstop: das im passive_controller
+                    # eingebaute Keepalive wird nur geprueft, wenn tatsaechlich
+                    # eine Shelly-Nachricht eintrifft (update() wird sonst gar
+                    # nicht aufgerufen). Bei niedriger/unregelmaessiger
+                    # Shelly-Nachrichtenrate driftet die tatsaechliche Sendung
+                    # dadurch immer weiter gegenueber der halben cd_time nach
+                    # hinten - im schlimmsten Fall bis zum tatsaechlichen
+                    # Ablauf von cd_time auf dem Geraet. Dieser bereits
+                    # unabhaengig laufende lokale Countdown dient hier
+                    # zusaetzlich als zuverlaessiger, von Shelly entkoppelter
+                    # Ausloeser.
+                    await self._send_passive_keepalive_from_countdown()
             try:
                 await asyncio.sleep(1.0)
             except asyncio.CancelledError:
                 raise
+
+    async def _send_passive_keepalive_from_countdown(self) -> None:
+        last_power = self.passive_ctrl.state.last_sent_setpoint_w
+        if last_power is None:
+            return
+        power_int = int(round(last_power))
+        if power_int == 0:
+            power_int = 1
+        config = {"mode": "Passive", "passive_cfg": {"power": power_int, "cd_time": self._passive_cd_time}}
+        try:
+            result = await self.udp.send_control("ES.SetMode", {"id": 0, "config": config})
+        except (MarstekCommunicationError, MarstekDeviceError):
+            logger.warning("Countdown-Keepalive konnte nicht gesendet werden - naechster Versuch in 1s")
+            return
+        if result.get("set_result"):
+            self.passive_ctrl.state.last_send_monotonic = time.monotonic()
+            self._start_countdown(self._passive_cd_time)
+            await self.mqtt.publish_state(self.bundle.entities["passive_last_sent_power"], power_int)
+            logger.info(
+                "Countdown-Keepalive gesendet (unabhaengig von Shelly-Nachrichten): "
+                "power=%dW cd_time=%ds",
+                power_int, self._passive_cd_time,
+            )
 
     # ------------------------------------------------------------------ #
     # Verbindungsstatus

@@ -273,7 +273,14 @@ aktiviert werden.
   (unveraenderter Sollwert), sobald seit der letzten Sendung die Haelfte
   der geraeteseitigen `cd_time` verstrichen ist - damit der Passive-Sollwert
   nicht verloren geht, wenn sich ueber laengere Zeit kein echtes Update
-  ergibt. Dieses Verhalten ist nicht abschaltbar.
+  ergibt. Dieses Verhalten ist nicht abschaltbar. Zusaetzlich zu dem im
+  Regler eingebauten Keepalive (das nur bei tatsaechlich eintreffenden
+  Shelly-Nachrichten geprueft wird) nutzt der ohnehin unabhaengig laufende
+  lokale Countdown (`sensor.passive_cd_time_remaining`) diese Schwelle
+  ebenfalls als zuverlaessigen, von der Shelly-Nachrichtenrate entkoppelten
+  Backstop - so kann die tatsaechliche Sendung bei seltenen/unregelmaessigen
+  Shelly-Nachrichten nicht mehr gegenueber der halben `cd_time` nach hinten
+  driften.
 - Waehrend einer SOC-Idle-Phase (siehe `idle_soc_threshold`) sendet ein
   eigener Hintergrund-Task weiterhin periodisch (alle `cd_time`/2) ein
   `Passive`-Kommando mit ~0W, statt einfach nichts mehr zu senden - so
